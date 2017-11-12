@@ -125,7 +125,7 @@ static bool init_gbm(struct ra_ctx *ctx)
         p->gbm.device,
         p->kms->mode.hdisplay,
         p->kms->mode.vdisplay,
-        GBM_FORMAT_XRGB8888,
+        p->primary_plane_format, // drm_fourcc.h defs should be gbm-compatible
         GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
     if (!p->gbm.surface) {
         MP_ERR(ctx->vo, "Failed to create GBM surface.\n");
