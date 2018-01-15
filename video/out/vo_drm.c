@@ -35,7 +35,8 @@
 #include "video/sws_utils.h"
 #include "vo.h"
 
-#define IMGFMT IMGFMT_BGR0
+/* #define IMGFMT IMGFMT_BGR0 */
+#define IMGFMT pixfmt2imgfmt(AV_PIX_FMT_GBRP10LE)
 #define BYTES_PER_PIXEL 4
 #define BITS_PER_PIXEL 32
 #define USE_MASTER 0
@@ -112,7 +113,7 @@ static bool fb_setup_single(struct vo *vo, int fd, struct framebuffer *buf)
     buf->handle = creq.handle;
 
     // create framebuffer object for the dumb-buffer
-    if (drmModeAddFB(fd, buf->width, buf->height, 24, creq.bpp, buf->stride,
+    if (drmModeAddFB(fd, buf->width, buf->height, 30, creq.bpp, buf->stride,
                      buf->handle, &buf->fb)) {
         MP_ERR(vo, "Cannot create framebuffer: %s\n", mp_strerror(errno));
         goto err;
@@ -327,15 +328,65 @@ static void draw_image(struct vo *vo, mp_image_t *mpi)
             osd_draw_on_image(vo->osd, p->osd, 0, 0, p->cur_frame);
         }
 
-        struct framebuffer *front_buf = &p->bufs[p->front_buf];
-        int w = p->dst.x1 - p->dst.x0;
-        int h = p->dst.y1 - p->dst.y0;
-        int x = (p->screen_w - w) >> 1;
-        int y = (p->screen_h - h) >> 1;
-        int shift = y * front_buf->stride + x * BYTES_PER_PIXEL;
-        memcpy_pic(front_buf->map + shift, p->cur_frame->planes[0],
-                   w * BYTES_PER_PIXEL, h, front_buf->stride,
-                   p->cur_frame->stride[0]);
+        struct framebuffer *const front_buf = &p->bufs[p->front_buf];
+        const int w = p->dst.x1 - p->dst.x0;
+        const int h = p->dst.y1 - p->dst.y0;
+        const int x = (p->screen_w - w) >> 1;
+        const int y = (p->screen_h - h) >> 1;
+        /* const int shift = y * front_buf->stride + x * BYTES_PER_PIXEL; */
+        /* memcpy_pic(front_buf->map + shift, p->cur_frame->planes[0], */
+        /*            w * BYTES_PER_PIXEL, h, front_buf->stride, */
+        /*            p->cur_frame->stride[0]); */
+
+        const int g_stride = p->cur_frame->stride[0]/sizeof(uint16_t);
+        const int b_stride = p->cur_frame->stride[1]/sizeof(uint16_t);
+        const int r_stride = p->cur_frame->stride[2]/sizeof(uint16_t);
+        const int fbuf_stride = (front_buf->stride/sizeof(uint32_t));
+        const int shift = y*fbuf_stride + x;
+
+        /* for (unsigned yy = 0; yy < h; ++yy) { */
+        /*     for (unsigned xx = 0; xx < w; ++xx) { */
+        /*         const uint16_t g = ((uint16_t*)p->cur_frame->planes[0])[xx + yy*g_stride]; */
+        /*         const uint16_t b = ((uint16_t*)p->cur_frame->planes[1])[xx + yy*b_stride]; */
+        /*         const uint16_t r = ((uint16_t*)p->cur_frame->planes[2])[xx + yy*r_stride]; */
+        /*         /\* ((uint32_t*)front_buf->map)[xx + yy*fbuf_stride] = (r & 0x3ff) << 20 | (g & 0x3ff) << 10 | (b & 0x3ff); *\/ */
+        /*         ((uint32_t*)front_buf->map)[(xx+x) + (yy+y)*fbuf_stride] = r << 20 | g << 10 | b; */
+        /*     } */
+        /* } */
+
+        /* uint16_t *g_ptr = (uint16_t*)p->cur_frame->planes[0]; */
+        /* uint16_t *b_ptr = (uint16_t*)p->cur_frame->planes[1]; */
+        /* uint16_t *r_ptr = (uint16_t*)p->cur_frame->planes[2]; */
+        /* uint32_t *fbuf_ptr = (uint32_t*)front_buf->map + shift; */
+        /* for (unsigned yy = 0; yy < h; ++yy) { */
+        /*     for (unsigned xx = 0; xx < w; ++xx) { */
+        /*         /\* fbuf_ptr[xx] = (r_ptr[xx] & 0x3ff) << 20 | (g_ptr[xx] & 0x3ff) << 10 | (b_ptr[xx] & 0x3ff); *\/ */
+        /*         fbuf_ptr[xx] = r_ptr[xx] << 20 | g_ptr[xx] << 10 | b_ptr[xx]; */
+        /*     } */
+        /*     g_ptr += g_stride; */
+        /*     b_ptr += b_stride; */
+        /*     r_ptr += r_stride; */
+        /*     fbuf_ptr += fbuf_stride; */
+        /* } */
+
+        uint16_t *g_ptr = (uint16_t*)p->cur_frame->planes[0];
+        uint16_t *b_ptr = (uint16_t*)p->cur_frame->planes[1];
+        uint16_t *r_ptr = (uint16_t*)p->cur_frame->planes[2];
+        uint32_t *fbuf_ptr = ((uint32_t*)front_buf->map) + shift;
+        const int g_padding = g_stride - w;
+        const int b_padding = b_stride - w;
+        const int r_padding = r_stride - w;
+        const int fbuf_padding = fbuf_stride - w;
+        for (unsigned yy = 0; yy < h; ++yy) {
+            for (unsigned xx = 0; xx < w; ++xx) {
+                /* *fbuf_ptr++ = ((*r_ptr++ & 0x3ff) << 20) | ((*g_ptr++ & 0x3ff) << 10) | (*b_ptr++ & 0x3ff); */
+                *fbuf_ptr++ = (*r_ptr++ << 20) | (*g_ptr++ << 10) | (*b_ptr++);
+            }
+            g_ptr += g_padding;
+            b_ptr += b_padding;
+            r_ptr += r_padding;
+            fbuf_ptr += fbuf_padding;
+        }
     }
 
     if (mpi != p->last_input) {
