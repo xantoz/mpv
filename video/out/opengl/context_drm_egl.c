@@ -411,6 +411,9 @@ static bool drm_egl_init(struct ra_ctx *ctx)
         return false;
     }
 
+    p->primary_plane_format = DRM_FORMAT_XRGB2101010;
+    MP_VERBOSE(ctx->vo, "Forcing DRM_FORMAT_XRGB2101010 (30bpp PoC)");
+
     if (!init_gbm(ctx)) {
         MP_ERR(ctx->vo, "Failed to setup GBM.\n");
         return false;
