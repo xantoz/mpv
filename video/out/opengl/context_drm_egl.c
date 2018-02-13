@@ -25,13 +25,13 @@
 #include <unistd.h>
 
 #include <gbm.h>
-#include <drm_fourcc.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
 #include "libmpv/opengl_cb.h"
 #include "video/out/drm_common.h"
 #include "common/common.h"
+#include "options/m_config.h"
 
 #include "egl_helpers.h"
 #include "common.h"
@@ -72,7 +72,7 @@ struct priv {
     struct gbm gbm;
     struct framebuffer *fb;
 
-    uint32_t primary_plane_format;
+    uint32_t gbm_format;
 
     bool active;
     bool waiting_for_flip;
@@ -125,7 +125,7 @@ static bool init_gbm(struct ra_ctx *ctx)
         p->gbm.device,
         p->kms->mode.hdisplay,
         p->kms->mode.vdisplay,
-        p->primary_plane_format, // drm_fourcc.h defs should be gbm-compatible
+        p->gbm_format,
         GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
     if (!p->gbm.surface) {
         MP_ERR(ctx->vo, "Failed to create GBM surface.\n");
@@ -159,7 +159,7 @@ static void update_framebuffer_from_bo(struct ra_ctx *ctx, struct gbm_bo *bo)
     uint32_t handle = gbm_bo_get_handle(bo).u32;
 
     int ret = drmModeAddFB2(fb->fd, fb->width, fb->height,
-                            p->primary_plane_format,
+                            p->gbm_format,
                             (uint32_t[4]){handle, 0, 0, 0},
                             (uint32_t[4]){stride, 0, 0, 0},
                             (uint32_t[4]){0, 0, 0, 0},
@@ -336,49 +336,6 @@ static void drm_egl_uninit(struct ra_ctx *ctx)
     }
 }
 
-// If primary plane supports ARGB8888 we want to use that, but if it doesn't we
-// fall back on XRGB8888. If the driver does not support atomic there is no
-// particular reason to be using ARGB8888, so we fall back to XRGB8888 (another
-// reason is that we do not have the convenient atomic_ctx and its convenient
-// primary_plane field).
-static bool probe_primary_plane_format(struct ra_ctx *ctx)
-{
-    struct priv *p = ctx->priv;
-    if (!p->kms->atomic_context) {
-        p->primary_plane_format = DRM_FORMAT_XRGB8888;
-        MP_VERBOSE(ctx->vo, "Not using DRM Atomic: Use DRM_FORMAT_XRGB8888 for primary plane.\n");
-        return true;
-    }
-
-    drmModePlane *drmplane =
-        drmModeGetPlane(p->kms->fd, p->kms->atomic_context->primary_plane->id);
-    bool have_argb8888 = false;
-    bool have_xrgb8888 = false;
-    bool result = false;
-    for (unsigned int i = 0; i < drmplane->count_formats; ++i) {
-        if (drmplane->formats[i] == DRM_FORMAT_ARGB8888) {
-            have_argb8888 = true;
-        } else if (drmplane->formats[i] == DRM_FORMAT_XRGB8888) {
-            have_xrgb8888 = true;
-        }
-    }
-
-    if (have_argb8888) {
-        p->primary_plane_format = DRM_FORMAT_ARGB8888;
-        MP_VERBOSE(ctx->vo, "DRM_FORMAT_ARGB8888 supported by primary plane.\n");
-        result = true;
-    } else if (have_xrgb8888) {
-        p->primary_plane_format = DRM_FORMAT_XRGB8888;
-        MP_VERBOSE(ctx->vo,
-                   "DRM_FORMAT_ARGB8888 not supported by primary plane: "
-                   "Falling back to DRM_FORMAT_XRGB8888.\n");
-        result = true;
-    }
-
-    drmModeFreePlane(drmplane);
-    return result;
-}
-
 static bool drm_egl_init(struct ra_ctx *ctx)
 {
     if (ctx->opts.probing) {
@@ -406,13 +363,26 @@ static bool drm_egl_init(struct ra_ctx *ctx)
         return false;
     }
 
-    if (!probe_primary_plane_format(ctx)) {
-        MP_ERR(ctx->vo, "No suitable format found on DRM primary plane.\n");
-        return false;
-    }
+    // We need to use transparent formats together with rkmpp/drmprime hwdec.
+    // This is because it renders the video to an overlay, while still drawing
+    // the OSD to the primary plane, which is stacked above the video overlay
+    // frame as to super-impose the OSD. When not using rkmpp/drmprime we simply
+    // draw everything to one plane, and XRGB formats are fine.
+    char *hwdec;
+    mp_read_option_raw(ctx->global, "hwdec", &m_option_type_string, &hwdec);
+    const bool using_hwdec_rkmpp = (0 == strncmp(hwdec, "rkmpp", 5));
+    talloc_free(hwdec);
+    hwdec = NULL;
 
-    p->primary_plane_format = DRM_FORMAT_XRGB2101010;
-    MP_VERBOSE(ctx->vo, "Forcing DRM_FORMAT_XRGB2101010 (30bpp PoC)");
+    if (DRM_OPTS_FORMAT_XRGB2101010 == ctx->vo->opts->drm_opts->drm_format) {
+        p->gbm_format = (using_hwdec_rkmpp) ? GBM_FORMAT_ARGB2101010 : GBM_FORMAT_XRGB2101010;
+        MP_VERBOSE(ctx->vo, "Setting GBM format to %s\n",
+                   (using_hwdec_rkmpp) ? "GBM_FORMAT_ARGB2101010" : "GBM_FORMAT_XRGB2101010");
+    } else {
+        p->gbm_format = (using_hwdec_rkmpp) ? GBM_FORMAT_ARGB8888 : GBM_FORMAT_XRGB8888;
+        MP_VERBOSE(ctx->vo, "Setting GBM format to %s\n",
+                   (using_hwdec_rkmpp) ? "GBM_FORMAT_ARGB8888" : "GBM_FORMAT_XRGB8888");
+    }
 
     if (!init_gbm(ctx)) {
         MP_ERR(ctx->vo, "Failed to setup GBM.\n");
