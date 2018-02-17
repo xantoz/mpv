@@ -83,6 +83,26 @@ struct priv {
     struct mpv_opengl_cb_drm_params drm_params;
 };
 
+static int match_config_to_visual(void *user_data, EGLConfig *configs, int num_configs)
+{
+    struct ra_ctx *ctx = (struct ra_ctx*)user_data;
+    struct priv *p = ctx->priv;
+    const EGLint visual_id = (EGLint)p->gbm_format;
+
+    for (unsigned int i = 0; i < num_configs; ++i) {
+        EGLint id;
+
+        if (!eglGetConfigAttrib(p->egl.display, configs[i], EGL_NATIVE_VISUAL_ID, &id))
+            continue;
+
+        if (visual_id == id)
+            return i;
+    }
+
+    MP_WARN(ctx, "Could not get EGLConfig matching the GBM visual. Picking default.\n");
+    return 0;
+}
+
 static bool init_egl(struct ra_ctx *ctx)
 {
     struct priv *p = ctx->priv;
@@ -97,7 +117,11 @@ static bool init_egl(struct ra_ctx *ctx)
         return false;
     }
     EGLConfig config;
-    if (!mpegl_create_context(ctx, p->egl.display, &p->egl.context, &config))
+    if (!mpegl_create_context_cb(ctx,
+                                 p->egl.display,
+                                 (struct mpegl_cb){match_config_to_visual, ctx},
+                                 &p->egl.context,
+                                 &config))
         return false;
     MP_VERBOSE(ctx, "Initializing EGL surface\n");
     p->egl.surface
