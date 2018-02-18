@@ -99,8 +99,8 @@ static int match_config_to_visual(void *user_data, EGLConfig *configs, int num_c
             return i;
     }
 
-    MP_WARN(ctx, "Could not get EGLConfig matching the GBM visual. Picking default.\n");
-    return 0;
+    MP_ERR(ctx, "Could not find EGLConfig matching the GBM visual.\n");
+    return -1;
 }
 
 static bool init_egl(struct ra_ctx *ctx)
