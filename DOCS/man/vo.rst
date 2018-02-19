@@ -501,10 +501,9 @@ Available video output drivers are:
         format with 2 bits of padding.
 
         Unless you have an intel graphics card, a recent kernel and a recent
-        version of mesa (>=18) xrgb2101010 is unlikely to work for you.
-
-        This currently only has an effect when used together with the ``drm``
-        backend for the ``gpu`` VO. The ``drm`` VO always uses xrgb8888.
+        version of mesa (>=18) xrgb2101010 is unlikely to work when using the
+        ``drm`` backend for the ``gpu`` VO. Using the unaccelerated ``drm`` VO
+        has a bigger chance of success, since it does not require support in mesa.
 
 ``mediacodec_embed`` (Android)
     Renders ``IMGFMT_MEDIACODEC`` frames directly to an ``android.view.Surface``.
