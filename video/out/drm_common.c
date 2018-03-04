@@ -262,6 +262,10 @@ struct kms *kms_create(struct mp_log *log, const char *connector_spec,
         goto err;
     }
 
+    if (drmSetMaster(kms->fd)) {
+        mp_warn(log, "Failed to acquire DRM master: %s\n", mp_strerror(errno));
+    }
+
     res = drmModeGetResources(kms->fd);
     if (!res) {
         mp_err(log, "Cannot retrieve DRM resources: %s\n", mp_strerror(errno));
@@ -280,7 +284,7 @@ struct kms *kms_create(struct mp_log *log, const char *connector_spec,
         mp_err(log, "Failed to set Universal planes capability\n");
     }
 
-    if (drmSetClientCap(kms->fd, DRM_CLIENT_CAP_ATOMIC, 1)) {
+    if (true || drmSetClientCap(kms->fd, DRM_CLIENT_CAP_ATOMIC, 1)) {
         mp_verbose(log, "No DRM Atomic support found\n");
     } else {
         mp_verbose(log, "DRM Atomic support found\n");
