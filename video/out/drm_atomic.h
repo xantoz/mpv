@@ -24,6 +24,9 @@
 
 #include "common/msg.h"
 
+#define DRM_OPTS_PRIMARY_PLANE -1
+#define DRM_OPTS_OVERLAY_PLANE -2
+
 struct drm_object {
     int fd;
     uint32_t id;
@@ -53,7 +56,7 @@ struct drm_object * drm_object_create(struct mp_log *log, int fd, uint32_t objec
 void drm_object_free(struct drm_object *object);
 void drm_object_print_info(struct mp_log *log, struct drm_object *object);
 struct drm_atomic_context *drm_atomic_create_context(struct mp_log *log, int fd, int crtc_id, int connector_id,
-													 int osd_plane_id, int video_plane_id);
+                                                     int osd_plane_idx, int video_plane_idx);
 void drm_atomic_destroy_context(struct drm_atomic_context *ctx);
 
 #endif // MP_DRMATOMIC_H
