@@ -314,17 +314,10 @@ static bool crtc_release_atomic(struct ra_ctx *ctx)
         MP_ERR(ctx->vo, "Failed to allocate drm atomic request\n");
         return false;
     }
-    drm_object_set_property(request, atomic_ctx->connector, "CRTC_ID", p->old_crtc->crtc_id);
 
-    uint32_t blob_id;
-    if (drmModeCreatePropertyBlob(p->kms->fd, &p->old_crtc->mode, sizeof(drmModeModeInfo),
-                                  &blob_id) != 0) {
-        MP_ERR(ctx->vo, "Failed to create DRM mode blob\n");
-        goto err;
+    if (0 != drm_atomic_restore_old_state(request, atomic_ctx)) {
+        MP_WARN(ctx->vo, "Got error while restoring old state\n");
     }
-    drm_object_set_property(request, atomic_ctx->crtc, "MODE_ID", blob_id);
-    drm_object_set_property(request, atomic_ctx->crtc, "ACTIVE", 1);
-    drm_object_set_property(request, atomic_ctx->osd_plane, "FB_ID", p->old_crtc->buffer_id);
 
     int ret = drmModeAtomicCommit(p->kms->fd, request, DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
 
@@ -333,10 +326,6 @@ static bool crtc_release_atomic(struct ra_ctx *ctx)
 
     drmModeAtomicFree(request);
     return ret == 0;
-
-  err:
-    drmModeAtomicFree(request);
-    return false;
 }
 
 static bool crtc_setup(struct ra_ctx *ctx)
@@ -344,13 +333,13 @@ static bool crtc_setup(struct ra_ctx *ctx)
     struct priv *p = ctx->priv;
     if (p->active)
         return true;
-    p->old_crtc = drmModeGetCrtc(p->kms->fd, p->kms->crtc_id);
 
     if (p->kms->atomic_context) {
         int ret = crtc_setup_atomic(ctx);
         p->active = true;
         return ret;
     } else {
+        p->old_crtc = drmModeGetCrtc(p->kms->fd, p->kms->crtc_id);
         int ret = drmModeSetCrtc(p->kms->fd, p->kms->crtc_id, p->fb->id,
                                  0, 0, &p->kms->connector->connector_id, 1,
                                  &p->kms->mode);

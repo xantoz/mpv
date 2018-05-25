@@ -44,6 +44,29 @@ struct drm_atomic_context {
     struct drm_object *video_plane;
 
     drmModeAtomicReq *request;
+
+    struct {
+        struct {
+            uint64_t crtc_id;
+        } connector;
+        struct {
+            uint64_t mode_id;
+            uint64_t active;
+        } crtc;
+        struct {
+            uint64_t fb_id;
+            uint64_t crtc_id;
+            uint64_t src_x;
+            uint64_t src_y;
+            uint64_t src_w;
+            uint64_t src_h;
+            uint64_t crtc_x;
+            uint64_t crtc_y;
+            uint64_t crtc_w;
+            uint64_t crtc_h;
+        } osd_plane;
+        // TODO? Video plane?
+    } old;
 };
 
 
@@ -58,5 +81,8 @@ void drm_object_print_info(struct mp_log *log, struct drm_object *object);
 struct drm_atomic_context *drm_atomic_create_context(struct mp_log *log, int fd, int crtc_id, int connector_id,
                                                      int osd_plane_idx, int video_plane_idx);
 void drm_atomic_destroy_context(struct drm_atomic_context *ctx);
+
+int drm_atomic_save_old_state(struct drm_atomic_context *ctx);
+int drm_atomic_restore_old_state(drmModeAtomicReqPtr request, struct drm_atomic_context *ctx);
 
 #endif // MP_DRMATOMIC_H

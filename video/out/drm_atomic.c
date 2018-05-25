@@ -302,3 +302,49 @@ void drm_atomic_destroy_context(struct drm_atomic_context *ctx)
     drm_object_free(ctx->video_plane);
     talloc_free(ctx);
 }
+
+int drm_atomic_save_old_state(struct drm_atomic_context *ctx)
+{
+    int ret = 0;
+
+    ret |= drm_object_get_property(ctx->connector, "CRTC_ID", &ctx->old.connector.crtc_id);
+
+    ret |= drm_object_get_property(ctx->crtc, "MODE_ID", &ctx->old.crtc.mode_id);
+    ret |= drm_object_get_property(ctx->crtc, "ACTIVE", &ctx->old.crtc.active);
+
+    ret |= drm_object_get_property(ctx->osd_plane, "FB_ID", &ctx->old.osd_plane.fb_id);
+    ret |= drm_object_get_property(ctx->osd_plane, "CRTC_ID", &ctx->old.osd_plane.crtc_id);
+    ret |= drm_object_get_property(ctx->osd_plane, "SRC_X", &ctx->old.osd_plane.src_x);
+    ret |= drm_object_get_property(ctx->osd_plane, "SRC_Y", &ctx->old.osd_plane.src_y);
+    ret |= drm_object_get_property(ctx->osd_plane, "SRC_W", &ctx->old.osd_plane.src_w);
+    ret |= drm_object_get_property(ctx->osd_plane, "SRC_H", &ctx->old.osd_plane.src_h);
+    ret |= drm_object_get_property(ctx->osd_plane, "CRTC_X", &ctx->old.osd_plane.crtc_x);
+    ret |= drm_object_get_property(ctx->osd_plane, "CRTC_Y", &ctx->old.osd_plane.crtc_y);
+    ret |= drm_object_get_property(ctx->osd_plane, "CRTC_W", &ctx->old.osd_plane.crtc_w);
+    ret |= drm_object_get_property(ctx->osd_plane, "CRTC_H", &ctx->old.osd_plane.crtc_h);
+
+    return ret;
+}
+
+int drm_atomic_restore_old_state(drmModeAtomicReqPtr request, struct drm_atomic_context *ctx)
+{
+    int ret = 0;
+
+    ret |= drm_object_set_property(request, ctx->connector, "CRTC_ID", ctx->old.connector.crtc_id);
+
+    ret |= drm_object_set_property(request, ctx->crtc, "MODE_ID", ctx->old.crtc.mode_id);
+    ret |= drm_object_set_property(request, ctx->crtc, "ACTIVE", ctx->old.crtc.active);
+
+    ret |= drm_object_set_property(request, ctx->osd_plane, "FB_ID", ctx->old.osd_plane.fb_id);
+    ret |= drm_object_set_property(request, ctx->osd_plane, "CRTC_ID", ctx->old.osd_plane.crtc_id);
+    ret |= drm_object_set_property(request, ctx->osd_plane, "SRC_X", ctx->old.osd_plane.src_x);
+    ret |= drm_object_set_property(request, ctx->osd_plane, "SRC_Y", ctx->old.osd_plane.src_y);
+    ret |= drm_object_set_property(request, ctx->osd_plane, "SRC_W", ctx->old.osd_plane.src_w);
+    ret |= drm_object_set_property(request, ctx->osd_plane, "SRC_H", ctx->old.osd_plane.src_h);
+    ret |= drm_object_set_property(request, ctx->osd_plane, "CRTC_X", ctx->old.osd_plane.crtc_x);
+    ret |= drm_object_set_property(request, ctx->osd_plane, "CRTC_Y", ctx->old.osd_plane.crtc_y);
+    ret |= drm_object_set_property(request, ctx->osd_plane, "CRTC_W", ctx->old.osd_plane.crtc_w);
+    ret |= drm_object_set_property(request, ctx->osd_plane, "CRTC_H", ctx->old.osd_plane.crtc_h);
+
+    return ret;
+}
