@@ -348,3 +348,27 @@ int drm_atomic_restore_old_state(drmModeAtomicReqPtr request, struct drm_atomic_
 
     return ret;
 }
+
+bool drm_mode_ensure_blob(int fd, struct drm_mode *mode)
+{
+    int ret = 0;
+
+    if (!mode->blob_id) {
+        ret = drmModeCreatePropertyBlob(fd, &mode->mode, sizeof(drmModeModeInfo),
+                                        &mode->blob_id);
+    }
+
+    return (ret == 0);
+}
+
+bool drm_mode_destroy_blob(int fd, struct drm_mode *mode)
+{
+    int ret = 0;
+
+    if (mode->blob_id) {
+        ret = drmModeDestroyPropertyBlob(fd, mode->blob_id);
+        mode->blob_id = 0;
+    }
+
+    return (ret == 0);
+}

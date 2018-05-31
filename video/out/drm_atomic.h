@@ -19,6 +19,7 @@
 #define MP_DRMATOMIC_H
 
 #include <stdlib.h>
+#include <stdbool.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 
@@ -27,12 +28,23 @@
 #define DRM_OPTS_PRIMARY_PLANE -1
 #define DRM_OPTS_OVERLAY_PLANE -2
 
+struct drm_mode {
+    drmModeModeInfo mode;
+    uint32_t blob_id;
+};
+
 struct drm_object {
     int fd;
     uint32_t id;
     uint32_t type;
     drmModeObjectProperties *props;
     drmModePropertyRes **props_info;
+};
+
+
+
+// Used to store & restore the state of the 
+struct drm_atomic_state {
 };
 
 struct drm_atomic_context {
@@ -50,7 +62,7 @@ struct drm_atomic_context {
             uint64_t crtc_id;
         } connector;
         struct {
-            uint64_t mode_id;
+            struct drm_mode mode;
             uint64_t active;
         } crtc;
         struct {
@@ -84,5 +96,8 @@ void drm_atomic_destroy_context(struct drm_atomic_context *ctx);
 
 int drm_atomic_save_old_state(struct drm_atomic_context *ctx);
 int drm_atomic_restore_old_state(drmModeAtomicReqPtr request, struct drm_atomic_context *ctx);
+
+bool drm_mode_ensure_blob(int fd, struct drm_mode *mode);
+bool drm_mode_destroy_blob(int fd, struct drm_mode *mode);
 
 #endif // MP_DRMATOMIC_H

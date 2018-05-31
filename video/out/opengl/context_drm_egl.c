@@ -252,6 +252,10 @@ static bool crtc_setup_atomic(struct ra_ctx *ctx)
     struct priv *p = ctx->priv;
     struct drm_atomic_context *atomic_ctx = p->kms->atomic_context;
 
+    if (0 != drm_atomic_save_old_state(atomic_ctx)) {
+        MP_WARN(ctx->vo, "Failed to save old DRM atomic state");
+    }
+
     drmModeAtomicReqPtr request = drmModeAtomicAlloc();
     if (!request) {
         MP_ERR(ctx->vo, "Failed to allocate drm atomic request\n");
@@ -264,13 +268,11 @@ static bool crtc_setup_atomic(struct ra_ctx *ctx)
     }
 
     uint32_t blob_id = 0;
-    if (drmModeCreatePropertyBlob(p->kms->fd, &p->kms->mode, sizeof(drmModeModeInfo),
-                                  &blob_id) != 0) {
+    if (!drm_mode_ensure_blob(p->kms->fd, &p->kms->mode)) {
         MP_ERR(ctx->vo, "Failed to create DRM mode blob\n");
-        blob_id = 0;
         goto err;
     }
-    if (drm_object_set_property(request, atomic_ctx->crtc, "MODE_ID", blob_id) < 0) {
+    if (drm_object_set_property(request, atomic_ctx->crtc, "MODE_ID", p->kms->mode.blob_id) < 0) {
         MP_ERR(ctx->vo, "Could not set MODE_ID on crtc\n");
         goto err;
     }
@@ -287,8 +289,8 @@ static bool crtc_setup_atomic(struct ra_ctx *ctx)
     drm_object_set_property(request, atomic_ctx->osd_plane, "SRC_H",   p->osd_size.height << 16);
     drm_object_set_property(request, atomic_ctx->osd_plane, "CRTC_X",  0);
     drm_object_set_property(request, atomic_ctx->osd_plane, "CRTC_Y",  0);
-    drm_object_set_property(request, atomic_ctx->osd_plane, "CRTC_W",  p->kms->mode.hdisplay);
-    drm_object_set_property(request, atomic_ctx->osd_plane, "CRTC_H",  p->kms->mode.vdisplay);
+    drm_object_set_property(request, atomic_ctx->osd_plane, "CRTC_W",  p->kms->mode.mode.hdisplay);
+    drm_object_set_property(request, atomic_ctx->osd_plane, "CRTC_H",  p->kms->mode.mode.vdisplay);
 
     int ret = drmModeAtomicCommit(p->kms->fd, request, DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
     if (ret)
@@ -298,8 +300,6 @@ static bool crtc_setup_atomic(struct ra_ctx *ctx)
     return ret == 0;
 
   err:
-    if (blob_id)
-        drmModeDestroyPropertyBlob(p->kms->fd, blob_id);
     drmModeAtomicFree(request);
     return false;
 }

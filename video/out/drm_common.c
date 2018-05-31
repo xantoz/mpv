@@ -252,7 +252,7 @@ static bool setup_mode(struct kms *kms, const char *mode_spec)
         return false;
     }
 
-    kms->mode = kms->connector->modes[mode_id];
+    kms->mode.mode = kms->connector->modes[mode_id];
     return true;
 }
 
@@ -296,7 +296,7 @@ struct kms *kms_create(struct mp_log *log, const char *connector_spec,
         .fd = open_card(card_no),
         .connector = NULL,
         .encoder = NULL,
-        .mode = { 0 },
+        .mode = { 0, 0 },
         .crtc_id = -1,
         .card_no = card_no,
     };
@@ -339,7 +339,6 @@ struct kms *kms_create(struct mp_log *log, const char *connector_spec,
         }
     }
 
-
     drmModeFreeResources(res);
     return kms;
 
@@ -356,6 +355,7 @@ void kms_destroy(struct kms *kms)
 {
     if (!kms)
         return;
+    drm_mode_destroy_blob(&kms->mode);
     if (kms->connector) {
         drmModeFreeConnector(kms->connector);
         kms->connector = NULL;
