@@ -314,7 +314,7 @@ static bool crtc_release_atomic(struct ra_ctx *ctx)
         return false;
     }
 
-    if (0 != drm_atomic_restore_old_state(request, atomic_ctx)) {
+    if (!drm_atomic_restore_old_state(request, atomic_ctx)) {
         MP_WARN(ctx->vo, "Got error while restoring old state\n");
     }
 
