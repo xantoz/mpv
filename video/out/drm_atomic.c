@@ -311,25 +311,25 @@ static bool drm_atomic_save_plane_state(struct drm_atomic_context *ctx,
 {
     bool ret = true;
 
-    if (0 >= drm_object_get_property(plane, "FB_ID", &plane_state->fb_id))
+    if (0 > drm_object_get_property(plane, "FB_ID", &plane_state->fb_id))
         ret = false;
-    if (0 >= drm_object_get_property(plane, "CRTC_ID", &plane_state->crtc_id))
+    if (0 > drm_object_get_property(plane, "CRTC_ID", &plane_state->crtc_id))
         ret = false;
-    if (0 >= drm_object_get_property(plane, "SRC_X", &plane_state->src_x))
+    if (0 > drm_object_get_property(plane, "SRC_X", &plane_state->src_x))
         ret = false;
-    if (0 >= drm_object_get_property(plane, "SRC_Y", &plane_state->src_y))
+    if (0 > drm_object_get_property(plane, "SRC_Y", &plane_state->src_y))
         ret = false;
-    if (0 >= drm_object_get_property(plane, "SRC_W", &plane_state->src_w))
+    if (0 > drm_object_get_property(plane, "SRC_W", &plane_state->src_w))
         ret = false;
-    if (0 >= drm_object_get_property(plane, "SRC_H", &plane_state->src_h))
+    if (0 > drm_object_get_property(plane, "SRC_H", &plane_state->src_h))
         ret = false;
-    if (0 >= drm_object_get_property(plane, "CRTC_X", &plane_state->crtc_x))
+    if (0 > drm_object_get_property(plane, "CRTC_X", &plane_state->crtc_x))
         ret = false;
-    if (0 >= drm_object_get_property(plane, "CRTC_Y", &plane_state->crtc_y))
+    if (0 > drm_object_get_property(plane, "CRTC_Y", &plane_state->crtc_y))
         ret = false;
-    if (0 >= drm_object_get_property(plane, "CRTC_W", &plane_state->crtc_w))
+    if (0 > drm_object_get_property(plane, "CRTC_W", &plane_state->crtc_w))
         ret = false;
-    if (0 >= drm_object_get_property(plane, "CRTC_H", &plane_state->crtc_h))
+    if (0 > drm_object_get_property(plane, "CRTC_H", &plane_state->crtc_h))
         ret = false;
     // ZPOS might not exist, so ignore whether or not this succeeds
     drm_object_get_property(plane, "ZPOS", &plane_state->zpos);
@@ -344,25 +344,25 @@ static bool drm_atomic_restore_plane_state(drmModeAtomicReq *request,
 {
     bool ret = true;
 
-    if (0 >= drm_object_set_property(request, plane, "FB_ID", plane_state->fb_id))
+    if (0 > drm_object_set_property(request, plane, "FB_ID", plane_state->fb_id))
         ret = false;
-    if (0 >= drm_object_set_property(request, plane, "CRTC_ID", plane_state->crtc_id))
+    if (0 > drm_object_set_property(request, plane, "CRTC_ID", plane_state->crtc_id))
         ret = false;
-    if (0 >= drm_object_set_property(request, plane, "SRC_X", plane_state->src_x))
+    if (0 > drm_object_set_property(request, plane, "SRC_X", plane_state->src_x))
         ret = false;
-    if (0 >= drm_object_set_property(request, plane, "SRC_Y", plane_state->src_y))
+    if (0 > drm_object_set_property(request, plane, "SRC_Y", plane_state->src_y))
         ret = false;
-    if (0 >= drm_object_set_property(request, plane, "SRC_W", plane_state->src_w))
+    if (0 > drm_object_set_property(request, plane, "SRC_W", plane_state->src_w))
         ret = false;
-    if (0 >= drm_object_set_property(request, plane, "SRC_H", plane_state->src_h))
+    if (0 > drm_object_set_property(request, plane, "SRC_H", plane_state->src_h))
         ret = false;
-    if (0 >= drm_object_set_property(request, plane, "CRTC_X", plane_state->crtc_x))
+    if (0 > drm_object_set_property(request, plane, "CRTC_X", plane_state->crtc_x))
         ret = false;
-    if (0 >= drm_object_set_property(request, plane, "CRTC_Y", plane_state->crtc_y))
+    if (0 > drm_object_set_property(request, plane, "CRTC_Y", plane_state->crtc_y))
         ret = false;
-    if (0 >= drm_object_set_property(request, plane, "CRTC_W", plane_state->crtc_w))
+    if (0 > drm_object_set_property(request, plane, "CRTC_W", plane_state->crtc_w))
         ret = false;
-    if (0 >= drm_object_set_property(request, plane, "CRTC_H", plane_state->crtc_h))
+    if (0 > drm_object_set_property(request, plane, "CRTC_H", plane_state->crtc_h))
         ret = false;
     // ZPOS might not exist, so ignore whether or not this succeeds
     drm_object_set_property(request, plane, "ZPOS", plane_state->zpos);
@@ -385,10 +385,10 @@ bool drm_atomic_save_old_state(struct drm_atomic_context *ctx)
     ctx->old_state.crtc.mode.mode = *((drmModeModeInfo*)mode_blob->data);
     drmModeFreePropertyBlob(mode_blob);
 
-    if (0 >= drm_object_get_property(ctx->crtc, "ACTIVE", &ctx->old_state.crtc.active))
+    if (0 > drm_object_get_property(ctx->crtc, "ACTIVE", &ctx->old_state.crtc.active))
         ret = false;
 
-    if (0 >= drm_object_get_property(ctx->connector, "CRTC_ID", &ctx->old_state.connector.crtc_id))
+    if (0 > drm_object_get_property(ctx->connector, "CRTC_ID", &ctx->old_state.connector.crtc_id))
         ret = false;
 
     if (!drm_atomic_save_plane_state(ctx, ctx->osd_plane, &ctx->old_state.osd_plane))
@@ -408,14 +408,14 @@ bool drm_atomic_restore_old_state(drmModeAtomicReqPtr request, struct drm_atomic
 
     bool ret = true;
 
-    if (0 >= drm_object_set_property(request, ctx->connector, "CRTC_ID", ctx->old_state.connector.crtc_id))
+    if (0 > drm_object_set_property(request, ctx->connector, "CRTC_ID", ctx->old_state.connector.crtc_id))
         ret = false;
 
     if (!drm_mode_ensure_blob(ctx->fd, &ctx->old_state.crtc.mode))
         ret = false;
-    if (0 >= drm_object_set_property(request, ctx->crtc, "MODE_ID", ctx->old_state.crtc.mode.blob_id))
+    if (0 > drm_object_set_property(request, ctx->crtc, "MODE_ID", ctx->old_state.crtc.mode.blob_id))
         ret = false;
-    if (0 >= drm_object_set_property(request, ctx->crtc, "ACTIVE", ctx->old_state.crtc.active))
+    if (0 > drm_object_set_property(request, ctx->crtc, "ACTIVE", ctx->old_state.crtc.active))
         ret = false;
 
     if (!drm_atomic_restore_plane_state(request, ctx, ctx->osd_plane, &ctx->old_state.osd_plane))

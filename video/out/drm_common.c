@@ -296,7 +296,7 @@ struct kms *kms_create(struct mp_log *log, const char *connector_spec,
         .fd = open_card(card_no),
         .connector = NULL,
         .encoder = NULL,
-        .mode = { 0, 0 },
+        .mode = {{0}},
         .crtc_id = -1,
         .card_no = card_no,
     };
@@ -478,7 +478,7 @@ static void kms_show_available_cards_connectors_and_modes(struct mp_log *log)
 
 double kms_get_display_fps(const struct kms *kms)
 {
-    return mode_get_Hz(&kms->mode);
+    return mode_get_Hz(&kms->mode.mode);
 }
 
 static int drm_validate_connector_opt(struct mp_log *log, const struct m_option *opt,
