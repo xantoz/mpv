@@ -377,13 +377,11 @@ bool drm_atomic_save_old_state(struct drm_atomic_context *ctx)
 
     bool ret = true;
 
-    drm_mode_destroy_blob(ctx->fd, &ctx->old_state.crtc.mode);
-    drmModePropertyBlobPtr mode_blob = drm_object_get_property_blob(ctx->crtc, "MODE_ID");
-    if (mode_blob == NULL)
+    drmModeCrtc *crtc = drmModeGetCrtc(ctx->fd, ctx->crtc->id);
+    if (crtc == NULL)
         return false;
-    assert(mode_blob->length == sizeof(drmModeModeInfo));
-    ctx->old_state.crtc.mode.mode = *((drmModeModeInfo*)mode_blob->data);
-    drmModeFreePropertyBlob(mode_blob);
+    ctx->old_state.crtc.mode.mode = crtc->mode;
+    drmModeFreeCrtc(crtc);
 
     if (0 > drm_object_get_property(ctx->crtc, "ACTIVE", &ctx->old_state.crtc.active))
         ret = false;
