@@ -253,7 +253,7 @@ static bool crtc_setup_atomic(struct ra_ctx *ctx)
     struct drm_atomic_context *atomic_ctx = p->kms->atomic_context;
 
     if (!drm_atomic_save_old_state(atomic_ctx)) {
-        MP_WARN(ctx->vo, "Failed to save old DRM atomic state");
+        MP_WARN(ctx->vo, "Failed to save old DRM atomic state\n");
     }
 
     drmModeAtomicReqPtr request = drmModeAtomicAlloc();
@@ -267,7 +267,6 @@ static bool crtc_setup_atomic(struct ra_ctx *ctx)
         return false;
     }
 
-    uint32_t blob_id = 0;
     if (!drm_mode_ensure_blob(p->kms->fd, &p->kms->mode)) {
         MP_ERR(ctx->vo, "Failed to create DRM mode blob\n");
         goto err;
@@ -342,7 +341,7 @@ static bool crtc_setup(struct ra_ctx *ctx)
         p->old_crtc = drmModeGetCrtc(p->kms->fd, p->kms->crtc_id);
         int ret = drmModeSetCrtc(p->kms->fd, p->kms->crtc_id, p->fb->id,
                                  0, 0, &p->kms->connector->connector_id, 1,
-                                 &p->kms->mode);
+                                 &p->kms->mode.mode);
         p->active = true;
         return ret == 0;
     }
@@ -365,19 +364,21 @@ static void crtc_release(struct ra_ctx *ctx)
         }
     }
 
-    if (p->old_crtc) {
-        if (p->kms->atomic_context) {
+    if (p->kms->atomic_context) {
+        if (p->kms->atomic_context->old_state.saved) {
             if (!crtc_release_atomic(ctx))
                 MP_ERR(ctx->vo, "Failed to restore previous mode\n");
-        } else {
+        }
+    } else {
+        if (p->old_crtc) {
             drmModeSetCrtc(p->kms->fd,
                            p->old_crtc->crtc_id, p->old_crtc->buffer_id,
                            p->old_crtc->x, p->old_crtc->y,
                            &p->kms->connector->connector_id, 1,
                            &p->old_crtc->mode);
+            drmModeFreeCrtc(p->old_crtc);
+            p->old_crtc = NULL;
         }
-        drmModeFreeCrtc(p->old_crtc);
-        p->old_crtc = NULL;
     }
 }
 
@@ -595,13 +596,13 @@ static bool drm_egl_init(struct ra_ctx *ctx)
             p->osd_size.width = ctx->vo->opts->drm_opts->drm_osd_size.w;
             p->osd_size.height = ctx->vo->opts->drm_opts->drm_osd_size.h;
         } else {
-            p->osd_size.width = p->kms->mode.hdisplay;
-            p->osd_size.height = p->kms->mode.vdisplay;
+            p->osd_size.width = p->kms->mode.mode.hdisplay;
+            p->osd_size.height = p->kms->mode.mode.vdisplay;
             MP_WARN(ctx, "Setting OSD size is only available with DRM atomic, defaulting to screen resolution\n");
         }
     } else {
-        p->osd_size.width = p->kms->mode.hdisplay;
-        p->osd_size.height = p->kms->mode.vdisplay;
+        p->osd_size.width = p->kms->mode.mode.hdisplay;
+        p->osd_size.height = p->kms->mode.mode.vdisplay;
     }
 
     uint32_t argb_format;

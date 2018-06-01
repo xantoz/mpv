@@ -355,7 +355,7 @@ void kms_destroy(struct kms *kms)
 {
     if (!kms)
         return;
-    drm_mode_destroy_blob(&kms->mode);
+    drm_mode_destroy_blob(kms->fd, &kms->mode);
     if (kms->connector) {
         drmModeFreeConnector(kms->connector);
         kms->connector = NULL;

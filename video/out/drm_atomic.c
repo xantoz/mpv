@@ -15,6 +15,7 @@
  * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <assert.h>
 #include <errno.h>
 #include <inttypes.h>
 
@@ -296,6 +297,7 @@ fail:
 
 void drm_atomic_destroy_context(struct drm_atomic_context *ctx)
 {
+    drm_mode_destroy_blob(ctx->fd, &ctx->old_state.crtc.mode);
     drm_object_free(ctx->crtc);
     drm_object_free(ctx->connector);
     drm_object_free(ctx->osd_plane);
@@ -335,7 +337,7 @@ static bool drm_atomic_save_plane_state(struct drm_atomic_context *ctx,
     return ret;
 }
 
-static bool drm_atomic_restore_plane_state(drmModeAtomicReqPtr request,
+static bool drm_atomic_restore_plane_state(drmModeAtomicReq *request,
                                            struct drm_atomic_context *ctx,
                                            struct drm_object *plane,
                                            struct drm_atomic_plane_state *plane_state)
@@ -370,14 +372,23 @@ static bool drm_atomic_restore_plane_state(drmModeAtomicReqPtr request,
 
 bool drm_atomic_save_old_state(struct drm_atomic_context *ctx)
 {
+    if (ctx->old_state.saved)
+        return false;
+
     bool ret = true;
 
-    if (0 >= drm_object_get_property(ctx->connector, "CRTC_ID", &ctx->old_state.connector.crtc_id))
+    drm_mode_destroy_blob(ctx->fd, &ctx->old_state.crtc.mode);
+    drmModePropertyBlobPtr mode_blob = drm_object_get_property_blob(ctx->crtc, "MODE_ID");
+    if (mode_blob == NULL)
+        return false;
+    assert(mode_blob->length == sizeof(drmModeModeInfo));
+    ctx->old_state.crtc.mode.mode = *((drmModeModeInfo*)mode_blob->data);
+    drmModeFreePropertyBlob(mode_blob);
+
+    if (0 >= drm_object_get_property(ctx->crtc, "ACTIVE", &ctx->old_state.crtc.active))
         ret = false;
 
-    if (0 >= drm_object_get_property(ctx->crtc, "MODE_ID", &ctx->old_state.crtc.mode_id))
-        ret = false;
-    if (0 >= drm_object_get_property(ctx->crtc, "ACTIVE", &ctx->old_state.crtc.active))
+    if (0 >= drm_object_get_property(ctx->connector, "CRTC_ID", &ctx->old_state.connector.crtc_id))
         ret = false;
 
     if (!drm_atomic_save_plane_state(ctx, ctx->osd_plane, &ctx->old_state.osd_plane))
@@ -385,17 +396,22 @@ bool drm_atomic_save_old_state(struct drm_atomic_context *ctx)
     if (!drm_atomic_save_plane_state(ctx, ctx->video_plane, &ctx->old_state.video_plane))
         ret = false;
 
+    ctx->old_state.saved = true;
+
     return ret;
 }
 
 bool drm_atomic_restore_old_state(drmModeAtomicReqPtr request, struct drm_atomic_context *ctx)
 {
+    if (!ctx->old_state.saved)
+        return false;
+
     bool ret = true;
 
     if (0 >= drm_object_set_property(request, ctx->connector, "CRTC_ID", ctx->old_state.connector.crtc_id))
         ret = false;
 
-    if (!drm_mode_ensure_blob(ctx->fd, &ctx->old_state->crtc.mode))
+    if (!drm_mode_ensure_blob(ctx->fd, &ctx->old_state.crtc.mode))
         ret = false;
     if (0 >= drm_object_set_property(request, ctx->crtc, "MODE_ID", ctx->old_state.crtc.mode.blob_id))
         ret = false;
@@ -406,6 +422,8 @@ bool drm_atomic_restore_old_state(drmModeAtomicReqPtr request, struct drm_atomic
         ret = false;
     if (!drm_atomic_restore_plane_state(request, ctx, ctx->video_plane, &ctx->old_state.video_plane))
         ret = false;
+
+    ctx->old_state.saved = false;
 
     return ret;
 }

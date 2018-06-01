@@ -49,6 +49,7 @@ struct drm_atomic_plane_state {
 
 // Used to store the restore state for VT switching and uninit
 struct drm_atomic_state {
+    bool saved;
     struct {
         uint64_t crtc_id;
     } connector;
@@ -95,8 +96,8 @@ struct drm_atomic_context *drm_atomic_create_context(struct mp_log *log, int fd,
                                                      int osd_plane_idx, int video_plane_idx);
 void drm_atomic_destroy_context(struct drm_atomic_context *ctx);
 
-int drm_atomic_save_old_state(struct drm_atomic_context *ctx);
-int drm_atomic_restore_old_state(drmModeAtomicReqPtr request, struct drm_atomic_context *ctx);
+bool drm_atomic_save_old_state(struct drm_atomic_context *ctx);
+bool drm_atomic_restore_old_state(drmModeAtomicReq *request, struct drm_atomic_context *ctx);
 
 bool drm_mode_ensure_blob(int fd, struct drm_mode *mode);
 bool drm_mode_destroy_blob(int fd, struct drm_mode *mode);
