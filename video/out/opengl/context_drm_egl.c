@@ -252,7 +252,7 @@ static bool crtc_setup_atomic(struct ra_ctx *ctx)
     struct priv *p = ctx->priv;
     struct drm_atomic_context *atomic_ctx = p->kms->atomic_context;
 
-    if (0 != drm_atomic_save_old_state(atomic_ctx)) {
+    if (!drm_atomic_save_old_state(atomic_ctx)) {
         MP_WARN(ctx->vo, "Failed to save old DRM atomic state");
     }
 

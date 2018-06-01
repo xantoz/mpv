@@ -33,6 +33,33 @@ struct drm_mode {
     uint32_t blob_id;
 };
 
+struct drm_atomic_plane_state {
+    uint64_t fb_id;
+    uint64_t crtc_id;
+    uint64_t src_x;
+    uint64_t src_y;
+    uint64_t src_w;
+    uint64_t src_h;
+    uint64_t crtc_x;
+    uint64_t crtc_y;
+    uint64_t crtc_w;
+    uint64_t crtc_h;
+    uint64_t zpos;
+};
+
+// Used to store the restore state for VT switching and uninit
+struct drm_atomic_state {
+    struct {
+        uint64_t crtc_id;
+    } connector;
+    struct {
+        struct drm_mode mode;
+        uint64_t active;
+    } crtc;
+    struct drm_atomic_plane_state osd_plane;
+    struct drm_atomic_plane_state video_plane;
+};
+
 struct drm_object {
     int fd;
     uint32_t id;
@@ -41,11 +68,6 @@ struct drm_object {
     drmModePropertyRes **props_info;
 };
 
-
-
-// Used to store & restore the state of the 
-struct drm_atomic_state {
-};
 
 struct drm_atomic_context {
     int fd;
@@ -57,28 +79,7 @@ struct drm_atomic_context {
 
     drmModeAtomicReq *request;
 
-    struct {
-        struct {
-            uint64_t crtc_id;
-        } connector;
-        struct {
-            struct drm_mode mode;
-            uint64_t active;
-        } crtc;
-        struct {
-            uint64_t fb_id;
-            uint64_t crtc_id;
-            uint64_t src_x;
-            uint64_t src_y;
-            uint64_t src_w;
-            uint64_t src_h;
-            uint64_t crtc_x;
-            uint64_t crtc_y;
-            uint64_t crtc_w;
-            uint64_t crtc_h;
-        } osd_plane;
-        // TODO? Video plane?
-    } old;
+    struct drm_atomic_state old_state;
 };
 
 
