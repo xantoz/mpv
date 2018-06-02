@@ -43,6 +43,11 @@
 
 static int vt_switcher_pipe[2];
 
+static int drm_validate_connector_opt(struct mp_log *log, const struct m_option *opt, struct bstr name, struct bstr param);
+static int drm_validate_mode_opt(struct mp_log *log, const struct m_option *opt, struct bstr name, struct bstr param);
+static void kms_show_available_modes(struct mp_log *log, const drmModeConnector *connector);
+static void kms_show_available_connectors(struct mp_log *log, int card_no);
+
 #define OPT_BASE_STRUCT struct drm_opts
 const struct m_sub_options drm_conf = {
     .opts = (const struct m_option[]) {
@@ -383,7 +388,7 @@ static double mode_get_Hz(const drmModeModeInfo *mode)
     return mode->clock * 1000.0 / mode->htotal / mode->vtotal;
 }
 
-void kms_show_available_modes(
+static void kms_show_available_modes(
     struct mp_log *log, const drmModeConnector *connector)
 {
     for (unsigned int i = 0; i < connector->count_modes; i++) {
@@ -436,7 +441,7 @@ static void kms_show_connector_name_and_state_callback(struct mp_log *log, int c
             (connector->connection == DRM_MODE_CONNECTED) ? "connected" : "disconnected");
 }
 
-void kms_show_available_connectors(struct mp_log *log, int card_no)
+static void kms_show_available_connectors(struct mp_log *log, int card_no)
 {
     mp_info(log, "Available connectors for card %d:\n", card_no);
     kms_show_foreach_connector(log, card_no, kms_show_connector_name_and_state_callback);
@@ -456,7 +461,7 @@ static void kms_show_connector_modes_callback(struct mp_log *log, int card_no,
     mp_info(log, "\n");
 }
 
-void kms_show_available_connectors_and_modes(struct mp_log *log, int card_no)
+static void kms_show_available_connectors_and_modes(struct mp_log *log, int card_no)
 {
     kms_show_foreach_connector(log, card_no, kms_show_connector_modes_callback);
 }
@@ -472,12 +477,12 @@ static void kms_show_foreach_card(struct mp_log *log, void (*show_fn)(struct mp_
     }
 }
 
-void kms_show_available_cards_and_connectors(struct mp_log *log)
+static void kms_show_available_cards_and_connectors(struct mp_log *log)
 {
     kms_show_foreach_card(log, kms_show_available_connectors);
 }
 
-void kms_show_available_cards_connectors_and_modes(struct mp_log *log)
+static void kms_show_available_cards_connectors_and_modes(struct mp_log *log)
 {
     kms_show_foreach_card(log, kms_show_available_connectors_and_modes);
 }
@@ -487,8 +492,8 @@ double kms_get_display_fps(const struct kms *kms)
     return mode_get_Hz(&kms->mode.mode);
 }
 
-int drm_validate_connector_opt(struct mp_log *log, const struct m_option *opt,
-                               struct bstr name, struct bstr param)
+static int drm_validate_connector_opt(struct mp_log *log, const struct m_option *opt,
+                                      struct bstr name, struct bstr param)
 {
     if (bstr_equals0(param, "help")) {
         kms_show_available_cards_and_connectors(log);
@@ -497,8 +502,8 @@ int drm_validate_connector_opt(struct mp_log *log, const struct m_option *opt,
     return 1;
 }
 
-int drm_validate_mode_opt(struct mp_log *log, const struct m_option *opt,
-                          struct bstr name, struct bstr param)
+static int drm_validate_mode_opt(struct mp_log *log, const struct m_option *opt,
+                                 struct bstr name, struct bstr param)
 {
     if (bstr_equals0(param, "help")) {
         kms_show_available_cards_connectors_and_modes(log);
