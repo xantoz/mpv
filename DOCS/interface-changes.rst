@@ -20,6 +20,10 @@ Interface changes
 ::
 
  --- mpv 0.30.0 ---
+    - make `--drm-mode` accept `help` as a parameter giving a listing of modes
+      and then terminating. This removes the need for the (undocumented) kludge
+      where you passed a negative or out of range option so you could get a
+      listing of modes in the error printout.
     - add `--drm-atomic` to allow explicitly turning atomic modesetting off even
       when it is available.
     - rename `--drm-osd-plane-id` to `--drm-draw-plane`, `--drm-video-plane-id` to
