@@ -484,10 +484,20 @@ Available video output drivers are:
         argument to disambiguate.
         (default: empty)
 
-    ``--drm-mode=<number>``
-        Mode ID to use (resolution and frame rate). Use ``--drm-mode=help`` to
-        get a list of available modes for all active connectors.
-        (default: 0)
+    ``--drm-mode=<preferred|highest|N|WxH[@R]>``
+        Mode to use (resolution and frame rate).
+        Possible values:
+
+        :preferred: Use the preferred mode for the screen on the selected
+                    connector. (default)
+        :highest:   Use the mode with the highest resolution available on the
+                    selected connector.
+        :N:         Select mode by index.
+        :WxH[@R]:   Specify mode by width, height, and optionally refresh rate.
+                    In case several modes match, selects the mode that comes
+                    first in the EDID list of modes.
+
+        Use ``--drm-mode=help`` to get a list of available modes for all active connectors.
 
     ``--drm-osd-plane-id=<primary|overlay|N>``
         Select the DRM plane to use for OSD (or OSD and video). The plane can be
@@ -505,7 +515,7 @@ Available video output drivers are:
         together with ``vo=gpu`` and ``gpu-context=drm``.
         (default: overlay)
 
-    ``--drm-format=<xrgb8888,xrgb2101010>``
+    ``--drm-format=<xrgb8888|xrgb2101010>``
         Select the DRM format to use (default: xrgb8888). This allows you to
         choose the bit depth of the DRM mode. xrgb8888 is your usual 24 bit per
         pixel/8 bits per channel packed RGB format with 8 bits of padding.
