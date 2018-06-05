@@ -20,6 +20,10 @@ Interface changes
 ::
 
  --- mpv 0.30.0 ---
+    - in addition to accepting a numerical index into the list of modes as
+      before, `--drm-mode` now also accepts `preferred`, `highest` and a mode
+      specified in the format `WxH[@R]`. The default value has changed from `0`
+      to `preferred`.
     - make `--drm-mode` accept `help` as a parameter giving a listing of modes
       and then terminating. This removes the need for the (undocumented) kludge
       where you passed a negative or out of range option so you could get a
