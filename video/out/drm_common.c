@@ -23,6 +23,7 @@
 #include <sys/stat.h>
 #include <sys/vt.h>
 #include <unistd.h>
+#include <stdio.h>
 #include <limits.h>
 #include <math.h>
 
@@ -113,6 +114,7 @@ struct drm_mode_spec {
     unsigned int width;
     unsigned int height;
     double refresh;
+    bool auto_refresh;
 };
 
 // KMS ------------------------------------------------------------------------
@@ -171,8 +173,8 @@ static bool setup_connector(struct kms *kms, const drmModeRes *res,
     drmModeConnector *connector;
 
     if (connector_name
-    && strcmp(connector_name, "")
-    && strcmp(connector_name, "auto")) {
+        && strcmp(connector_name, "")
+        && strcmp(connector_name, "auto")) {
         connector = get_connector_by_name(kms, res, connector_name);
         if (!connector) {
             MP_ERR(kms, "No connector with name %s found\n", connector_name);
@@ -259,97 +261,161 @@ static bool setup_crtc(struct kms *kms, const drmModeRes *res)
     return true;
 }
 
-static bool all_digits(const char *str)
+static bool streq_head(const char *head, const char *str, char **rest)
 {
-    if (str == NULL || str[0] == '\0') {
-        return false;
+    const size_t len = strlen(head);
+    if (0 == strncmp(head, str, len)) {
+        *rest = (char*)str + len;
+        return true;
     }
 
-    for (const char *c = str; *c != '\0'; ++c) {
-        if (!mp_isdigit(*c))
-            return false;
-    }
+    return false;
+}
+
+static bool pms_end(const char *c)
+{
+    return c[0] == '\0';
+}
+
+static bool pms_uint(const char *c, unsigned int *n_ptr, char **rest)
+{
+    if (!mp_isdigit(c[0]))
+        return false;
+
+    const unsigned int n = strtoul(c, rest, 10);
+    if (c == *rest)
+        return false;
+
+    if (n_ptr)
+        *n_ptr = n;
+
     return true;
+}
+
+static bool pms_positive_double(const char *c, double *d_ptr, char **rest)
+{
+    if (!(mp_isdigit(c[0]) || c[0] == '.'))
+        return false;
+
+    const double d = strtod(c, rest);
+    if (c == *rest)
+        return false;
+
+    if (d_ptr)
+        *d_ptr = d;
+
+    return true;
+}
+
+static bool pms_auto_clause(const char *c, struct drm_mode_spec *parse_result)
+{
+    if (pms_end(c))
+        return true;
+
+    char *rest;
+    if (streq_head("@auto", c, &rest)) {
+        if (parse_result) {
+            parse_result->auto_refresh = true;
+            parse_result->refresh = nan("");
+        }
+        return pms_end(rest);
+    }
+
+    return false;
+}
+
+static bool pms_highest(const char *c, struct drm_mode_spec *parse_result)
+{
+    char *rest;
+    if (streq_head("highest", c, &rest)) {
+        if (parse_result)
+            parse_result->type = DRM_MODE_SPEC_HIGHEST;
+        return pms_auto_clause(rest, parse_result);
+    }
+
+    return false;
+}
+
+static bool pms_preferred(const char *c, struct drm_mode_spec *parse_result)
+{
+    char *rest;
+    if (streq_head("preferred", c, &rest)) {
+        if (parse_result)
+            parse_result->type = DRM_MODE_SPEC_PREFERRED;
+        return pms_auto_clause(rest, parse_result);
+    }
+
+    return false;
+}
+
+static bool pms_idx(const char *c, struct drm_mode_spec *parse_result)
+{
+    char *rest;
+
+
+    if (pms_uint(c, (parse_result) ? &parse_result->idx : NULL, &rest) && pms_end(rest)) {
+        if (parse_result)
+            parse_result->type = DRM_MODE_SPEC_BY_IDX;
+        return true;
+    }
+
+    return false;
+}
+
+static bool pms_refresh_clause(const char *c, struct drm_mode_spec *parse_result)
+{
+    if (parse_result)
+        parse_result->refresh = nan("");
+
+    if (pms_end(c))
+        return true;
+
+    char *rest;
+    return
+        c[0] == '@' &&
+        pms_positive_double(c + 1, (parse_result) ? &parse_result->refresh : NULL, &rest) &&
+        pms_end(rest);
+}
+
+static bool pms_refresh(const char *c, struct drm_mode_spec *parse_result)
+{
+    return pms_auto_clause(c, parse_result) || pms_refresh_clause(c, parse_result);
+}
+
+static bool pms_res(const char *c, struct drm_mode_spec *parse_result)
+{
+    char *rest;
+    if (pms_uint(c, (parse_result) ? &parse_result->width : NULL, &rest) &&
+        rest[0] == 'x' &&
+        pms_uint(rest + 1, (parse_result) ? &parse_result->height : NULL, &rest) &&
+        pms_refresh(rest, parse_result)) {
+        if (parse_result)
+            parse_result->type = DRM_MODE_SPEC_BY_NUMBERS;
+        return true;
+    }
+
+    return false;
 }
 
 static bool parse_mode_spec(const char *spec, struct drm_mode_spec *parse_result)
 {
-    if (spec == NULL || spec[0] == '\0' || 0 == strcmp(spec, "preferred")) {
-        if (parse_result)
-            *parse_result = (struct drm_mode_spec) { .type = DRM_MODE_SPEC_PREFERRED };
-        return true;
-    }
-
-    if (0 == strcmp(spec, "highest")) {
-        if (parse_result)
-            *parse_result = (struct drm_mode_spec) { .type = DRM_MODE_SPEC_HIGHEST };
-        return true;
-    }
-
-    // If the string is made up of only digits, it means that it is an index number
-    if (all_digits(spec)) {
-        if (parse_result) {
-            *parse_result = (struct drm_mode_spec) {
-                .type = DRM_MODE_SPEC_BY_IDX,
-                .idx = strtoul(spec, NULL, 10),
-            };
-        }
-        return true;
-    }
-
-    if (!mp_isdigit(spec[0]))
-        return false;
-    char *height_part, *refresh_part;
-    const unsigned int width = strtoul(spec, &height_part, 10);
-    if (spec == height_part || height_part[0] == '\0' || height_part[0] != 'x')
-        return false;
-
-    height_part += 1;
-    if (!mp_isdigit(height_part[0]))
-        return false;
-    const unsigned int height = strtoul(height_part, &refresh_part, 10);
-    if (height_part == refresh_part)
-        return false;
-
-    char *rest = NULL;
-    double refresh;
-    switch (refresh_part[0]) {
-    case '\0':
-        refresh = nan("");
-        break;
-    case '@':
-        refresh_part += 1;
-        if (!(mp_isdigit(refresh_part[0]) || refresh_part[0] == '.'))
-            return false;
-        refresh = strtod(refresh_part, &rest);
-        if (refresh_part == rest || rest[0] != '\0' || refresh < 0.0)
-            return false;
-        break;
-    default:
-        return false;
-    }
-
     if (parse_result) {
-        *parse_result = (struct drm_mode_spec) {
-            .type = DRM_MODE_SPEC_BY_NUMBERS,
-            .width = width,
-            .height = height,
-            .refresh = refresh,
-        };
-    }
-    return true;
-}
-
-static bool setup_mode_by_idx(struct kms *kms, unsigned int mode_idx)
-{
-    if (mode_idx >= kms->connector->count_modes) {
-        MP_ERR(kms, "Bad mode index (max = %d).\n",
-               kms->connector->count_modes - 1);
-        return false;
+        memset(parse_result, 0, sizeof(*parse_result));
+        parse_result->refresh = nan(""); // refresh uses NaN for non-set
     }
 
-    kms->mode.mode = kms->connector->modes[mode_idx];
-    return true;
+    // default to preferred
+    if (spec == NULL || spec[0] == '\0') {
+        if (parse_result)
+            parse_result->type = DRM_MODE_SPEC_PREFERRED;
+        return true;
+    }
+
+    return
+        pms_highest(spec, parse_result) ||
+        pms_preferred(spec, parse_result) ||
+        pms_idx(spec, parse_result) ||
+        pms_res(spec, parse_result);
 }
 
 static bool mode_match(const drmModeModeInfo *mode,
@@ -357,6 +423,9 @@ static bool mode_match(const drmModeModeInfo *mode,
                        unsigned int height,
                        double refresh)
 {
+    if (mode->flags & DRM_MODE_FLAG_INTERLACE)
+        return false;
+
     if (isnan(refresh)) {
         return
             (mode->hdisplay == width) &&
@@ -370,56 +439,154 @@ static bool mode_match(const drmModeModeInfo *mode,
     }
 }
 
+static bool mode_preferred(const drmModeModeInfo *mode,
+                           unsigned int width,
+                           unsigned int height,
+                           double refresh)
+{
+    return mode->type & DRM_MODE_TYPE_PREFERRED;
+}
+
+static bool find_first_matching_mode(struct kms *kms,
+                                     unsigned int width,
+                                     unsigned int height,
+                                     double refresh,
+                                     bool (*match_fn)(const drmModeModeInfo *mode,
+                                                      unsigned int width,
+                                                      unsigned int height,
+                                                      double refresh),
+                                     drmModeModeInfo *out)
+{
+    for (unsigned int i = 0; i < kms->connector->count_modes; ++i) {
+        drmModeModeInfo *current_mode = &kms->connector->modes[i];
+        if (match_fn(current_mode, width, height, refresh)) {
+            *out = *current_mode;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void setup_single_mode(struct kms *kms, const drmModeModeInfo *mode)
+{
+    kms->mode_list = talloc_zero_array(kms, struct drm_mode, 1);
+    kms->mode_list[0].mode = *mode;
+    kms->mode_list_len = 1;
+    kms->active_mode = &kms->mode_list[0];
+}
+
+static bool setup_all_matching_modes(struct kms *kms,
+                                     unsigned int width,
+                                     unsigned int height,
+                                     double refresh,
+                                     bool (*match_fn)(const drmModeModeInfo *mode,
+                                                      unsigned int width,
+                                                      unsigned int height,
+                                                      double refresh))
+{
+    unsigned int count = 0;
+    for (unsigned int i = 0; i < kms->connector->count_modes; ++i) {
+        drmModeModeInfo *current_mode = &kms->connector->modes[i];
+        if (match_fn(current_mode, width, height, refresh))
+            count++;
+    }
+
+    if (count == 0)
+        return false;
+
+    kms->mode_list = talloc_zero_array(kms, struct drm_mode, count);
+    kms->mode_list_len = count;
+    unsigned int n = 0;
+    for (unsigned int i = 0; i < kms->connector->count_modes; ++i) {
+        drmModeModeInfo *current_mode = &kms->connector->modes[i];
+        if (match_fn(current_mode, width, height, refresh)) {
+            kms->mode_list[n++].mode = *current_mode;
+        }
+    }
+
+    kms->active_mode = &kms->mode_list[0];
+
+    return true;
+}
+
+static bool setup_mode_by_idx(struct kms *kms, unsigned int mode_idx)
+{
+    if (mode_idx >= kms->connector->count_modes) {
+        MP_ERR(kms, "Bad mode index (max = %d).\n",
+               kms->connector->count_modes - 1);
+        return false;
+    }
+
+    setup_single_mode(kms, &kms->connector->modes[mode_idx]);
+    return true;
+}
+
 static bool setup_mode_by_numbers(struct kms *kms,
                                   unsigned int width,
                                   unsigned int height,
                                   double refresh,
+                                  bool auto_refresh,
                                   const char *mode_spec)
 {
-    for (unsigned int i = 0; i < kms->connector->count_modes; ++i) {
-        drmModeModeInfo *current_mode = &kms->connector->modes[i];
-        if (mode_match(current_mode, width, height, refresh)) {
-            kms->mode.mode = *current_mode;
-            return true;
+    if (auto_refresh) {
+        if (!setup_all_matching_modes(kms, width, height, refresh, mode_match)) {
+            MP_ERR(kms, "Could not find any modes matching %s\n", mode_spec);
+            return false;
         }
+    } else {
+        drmModeModeInfo mode;
+        if (!find_first_matching_mode(kms, width, height, refresh, mode_match, &mode)) {
+            MP_ERR(kms, "Could not find any mode matching %s\n", mode_spec);
+            return false;
+        }
+        setup_single_mode(kms, &mode);
     }
 
-    MP_ERR(kms, "Could not find mode matching %s\n", mode_spec);
-    return false;
-}
-
-static bool setup_mode_preferred(struct kms *kms)
-{
-    for (unsigned int i = 0; i < kms->connector->count_modes; ++i) {
-        drmModeModeInfo *current_mode = &kms->connector->modes[i];
-        if (current_mode->type & DRM_MODE_TYPE_PREFERRED) {
-            kms->mode.mode = *current_mode;
-            return true;
-        }
-    }
-
-    // Fall back to first mode
-    MP_WARN(kms, "Could not find any preferred mode. Picking the first mode.\n");
-    kms->mode.mode = kms->connector->modes[0];
     return true;
 }
 
-static bool setup_mode_highest(struct kms *kms)
+static bool setup_mode_preferred(struct kms *kms, bool auto_refresh)
+{
+    drmModeModeInfo mode;
+    if (!find_first_matching_mode(kms, 0, 0, 0.0, mode_preferred, &mode)) {
+        // Fall back to first mode
+        MP_WARN(kms, "Could not find any preferred mode. Picking the first mode.\n");
+        mode = kms->connector->modes[0];
+    }
+
+    if (auto_refresh) {
+        char spec[128];
+        snprintf(spec, sizeof(spec), "%dx%d@auto", mode.hdisplay, mode.vdisplay);
+        return setup_mode_by_numbers(kms, mode.hdisplay, mode.vdisplay, nan(""), true, spec);
+    } else {
+        setup_single_mode(kms, &mode);
+        return true;
+    }
+}
+
+static bool setup_mode_highest(struct kms *kms, bool auto_refresh)
 {
     unsigned int area = 0;
-    drmModeModeInfo *highest_resolution_mode = &kms->connector->modes[0];
+    drmModeModeInfo *highest = &kms->connector->modes[0];
     for (unsigned int i = 0; i < kms->connector->count_modes; ++i) {
         drmModeModeInfo *current_mode = &kms->connector->modes[i];
 
         const unsigned int current_area = current_mode->hdisplay * current_mode->vdisplay;
         if (current_area > area) {
-            highest_resolution_mode = current_mode;
+            highest = current_mode;
             area = current_area;
         }
     }
 
-    kms->mode.mode = *highest_resolution_mode;
-    return true;
+    if (auto_refresh) {
+        char spec[128];
+        snprintf(spec, sizeof(spec), "%dx%d@auto", highest->hdisplay, highest->vdisplay);
+        return setup_mode_by_numbers(kms, highest->hdisplay, highest->vdisplay, nan(""), true, spec);
+    } else {
+        setup_single_mode(kms, highest);
+        return true;
+    }
 }
 
 static bool setup_mode(struct kms *kms, const char *mode_spec)
@@ -441,20 +608,34 @@ static bool setup_mode(struct kms *kms, const char *mode_spec)
             goto err;
         break;
     case DRM_MODE_SPEC_BY_NUMBERS:
-        if (!setup_mode_by_numbers(kms, parsed.width, parsed.height, parsed.refresh, mode_spec))
+        if (!setup_mode_by_numbers(kms,
+                                   parsed.width, parsed.height,
+                                   parsed.refresh, parsed.auto_refresh,
+                                   mode_spec))
             goto err;
         break;
     case DRM_MODE_SPEC_PREFERRED:
-        if (!setup_mode_preferred(kms))
+        if (!setup_mode_preferred(kms, parsed.auto_refresh))
             goto err;
         break;
     case DRM_MODE_SPEC_HIGHEST:
-        if (!setup_mode_highest(kms))
+        if (!setup_mode_highest(kms, parsed.auto_refresh))
             goto err;
         break;
     default:
         MP_ERR(kms, "setup_mode: Internal error\n");
         goto err;
+    }
+
+    puts("---mode_list---");
+    for (unsigned int i = 0; i < kms->mode_list_len; ++i) {
+        drmModeModeInfo *mode = &kms->mode_list[i].mode;
+        printf("  Mode %u: %s (%dx%d@%.2fHz)\n",
+               i,
+               mode->name,
+               mode->hdisplay,
+               mode->vdisplay,
+               mode_get_Hz(mode));
     }
 
     return true;
@@ -505,7 +686,8 @@ struct kms *kms_create(struct mp_log *log, const char *connector_spec,
         .fd = open_card(card_no),
         .connector = NULL,
         .encoder = NULL,
-        .mode = {{0}},
+        .mode_list = NULL,
+        .mode_list_len = 0,
         .crtc_id = -1,
         .card_no = card_no,
     };
@@ -566,7 +748,9 @@ void kms_destroy(struct kms *kms)
 {
     if (!kms)
         return;
-    drm_mode_destroy_blob(kms->fd, &kms->mode);
+    for (unsigned int i = 0; i < kms->mode_list_len; ++i) {
+        drm_mode_destroy_blob(kms->fd, &kms->mode_list[i]);
+    }
     if (kms->connector) {
         drmModeFreeConnector(kms->connector);
         kms->connector = NULL;
@@ -689,7 +873,7 @@ static void kms_show_available_cards_connectors_and_modes(struct mp_log *log)
 
 double kms_get_display_fps(const struct kms *kms)
 {
-    return mode_get_Hz(&kms->mode.mode);
+    return mode_get_Hz(&kms->active_mode->mode);
 }
 
 static int drm_validate_connector_opt(struct mp_log *log, const struct m_option *opt,
@@ -875,4 +1059,51 @@ void vt_switcher_poll(struct vt_switcher *s, int timeout_ms)
     case EVT_INTERRUPT:
         break;
     }
+}
+
+// DRM auto refresh selection -------------------------------------------------
+static struct drm_mode *find_best_fitting_mode(struct kms *kms, double fps)
+{
+    for (unsigned int mult = 0; mult < 3; ++mult) {
+        for (unsigned int i = 0; i < kms->mode_list_len; ++i) {
+            struct drm_mode *mode = &kms->mode_list[i];
+            if (fabs(mode_get_Hz(&mode->mode) - (mult * fps)) < 0.001) {
+                return mode;
+            }
+        }
+    }
+
+    for (unsigned int mult = 0; mult < 3; ++mult) {
+        for (unsigned int i = 0; i < kms->mode_list_len; ++i) {
+            struct drm_mode *mode = &kms->mode_list[i];
+            if (fabs(mode_get_Hz(&mode->mode) - (mult * fps)) < 0.2) {
+                return mode;
+            }
+        }
+    }
+
+    double max_hz = -1.0;
+    struct drm_mode *max_mode = NULL;
+    for (unsigned int i = 0; i < kms->mode_list_len; ++i) {
+        struct drm_mode *mode = &kms->mode_list[i];
+        double hz = mode_get_Hz(&mode->mode);
+        if (hz > max_hz) {
+            max_hz = hz;
+            max_mode = mode;
+        }
+    }
+
+    return max_mode;
+}
+
+void kms_select_active_mode(struct kms *kms, double fps)
+{
+    kms->active_mode = find_best_fitting_mode(kms, fps);
+
+    drmModeModeInfo *mode = &kms->active_mode->mode;
+    printf("Selected mode: %s (%dx%d@%.2fHz)\n",
+           mode->name,
+           mode->hdisplay,
+           mode->vdisplay,
+           mode_get_Hz(mode));
 }

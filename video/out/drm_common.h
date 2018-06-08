@@ -32,7 +32,9 @@ struct kms {
     int fd;
     drmModeConnector *connector;
     drmModeEncoder *encoder;
-    struct drm_mode mode;
+    struct drm_mode *mode_list;   // List of modes that we may auto-switch between
+    size_t mode_list_len;         // Length of list of modes. Must be at least 1
+    struct drm_mode *active_mode; // Points to the currently active mode
     uint32_t crtc_id;
     int card_no;
     struct drm_atomic_context *atomic_context;
@@ -70,5 +72,11 @@ struct kms *kms_create(struct mp_log *log, const char *connector_spec,
                        bool use_atomic);
 void kms_destroy(struct kms *kms);
 double kms_get_display_fps(const struct kms *kms);
+
+/**
+ * Selects what mode to use based on the FPS (typically FPS of video being
+ * played) passed in.
+ */
+void kms_select_active_mode(struct kms *kms, double fps);
 
 #endif

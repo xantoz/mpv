@@ -37,6 +37,10 @@
 #include "common.h"
 #include "context.h"
 
+#include "common/global.h"
+#include "player/core.h"
+#include "player/client.h"
+
 #define USE_MASTER 0
 
 struct framebuffer
@@ -267,11 +271,11 @@ static bool crtc_setup_atomic(struct ra_ctx *ctx)
         return false;
     }
 
-    if (!drm_mode_ensure_blob(p->kms->fd, &p->kms->mode)) {
+    if (!drm_mode_ensure_blob(p->kms->fd, p->kms->active_mode)) {
         MP_ERR(ctx->vo, "Failed to create DRM mode blob\n");
         goto err;
     }
-    if (drm_object_set_property(request, atomic_ctx->crtc, "MODE_ID", p->kms->mode.blob_id) < 0) {
+    if (drm_object_set_property(request, atomic_ctx->crtc, "MODE_ID", p->kms->active_mode->blob_id) < 0) {
         MP_ERR(ctx->vo, "Could not set MODE_ID on crtc\n");
         goto err;
     }
@@ -288,8 +292,8 @@ static bool crtc_setup_atomic(struct ra_ctx *ctx)
     drm_object_set_property(request, atomic_ctx->osd_plane, "SRC_H",   p->osd_size.height << 16);
     drm_object_set_property(request, atomic_ctx->osd_plane, "CRTC_X",  0);
     drm_object_set_property(request, atomic_ctx->osd_plane, "CRTC_Y",  0);
-    drm_object_set_property(request, atomic_ctx->osd_plane, "CRTC_W",  p->kms->mode.mode.hdisplay);
-    drm_object_set_property(request, atomic_ctx->osd_plane, "CRTC_H",  p->kms->mode.mode.vdisplay);
+    drm_object_set_property(request, atomic_ctx->osd_plane, "CRTC_W",  p->kms->active_mode->mode.hdisplay);
+    drm_object_set_property(request, atomic_ctx->osd_plane, "CRTC_H",  p->kms->active_mode->mode.vdisplay);
 
     int ret = drmModeAtomicCommit(p->kms->fd, request, DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
     if (ret)
@@ -341,7 +345,7 @@ static bool crtc_setup(struct ra_ctx *ctx)
         p->old_crtc = drmModeGetCrtc(p->kms->fd, p->kms->crtc_id);
         int ret = drmModeSetCrtc(p->kms->fd, p->kms->crtc_id, p->fb->id,
                                  0, 0, &p->kms->connector->connector_id, 1,
-                                 &p->kms->mode.mode);
+                                 &p->kms->active_mode->mode);
         p->active = true;
         return ret == 0;
     }
@@ -599,13 +603,13 @@ static bool drm_egl_init(struct ra_ctx *ctx)
             p->osd_size.width = ctx->vo->opts->drm_opts->drm_osd_size.w;
             p->osd_size.height = ctx->vo->opts->drm_opts->drm_osd_size.h;
         } else {
-            p->osd_size.width = p->kms->mode.mode.hdisplay;
-            p->osd_size.height = p->kms->mode.mode.vdisplay;
+            p->osd_size.width = p->kms->active_mode->mode.hdisplay;
+            p->osd_size.height = p->kms->active_mode->mode.vdisplay;
             MP_WARN(ctx, "Setting OSD size is only available with DRM atomic, defaulting to screen resolution\n");
         }
     } else {
-        p->osd_size.width = p->kms->mode.mode.hdisplay;
-        p->osd_size.height = p->kms->mode.mode.vdisplay;
+        p->osd_size.width = p->kms->active_mode->mode.hdisplay;
+        p->osd_size.height = p->kms->active_mode->mode.vdisplay;
     }
 
     uint32_t argb_format;
@@ -656,12 +660,6 @@ static bool drm_egl_init(struct ra_ctx *ctx)
         return false;
     }
 
-    if (!crtc_setup(ctx)) {
-        MP_ERR(ctx, "Failed to set CRTC for connector %u: %s\n",
-               p->kms->connector->connector_id, mp_strerror(errno));
-        return false;
-    }
-
     p->drm_params.fd = p->kms->fd;
     p->drm_params.crtc_id = p->kms->crtc_id;
     p->drm_params.connector_id = p->kms->connector->connector_id;
@@ -698,6 +696,18 @@ static bool drm_egl_init(struct ra_ctx *ctx)
 static bool drm_egl_reconfig(struct ra_ctx *ctx)
 {
     struct priv *p = ctx->priv;
+
+    struct MPContext *mpctx = mp_client_api_get_core(ctx->global->client_api);
+    double container_fps = mpctx->vo_chain ? mpctx->vo_chain->filter->container_fps : 0.0;
+
+    kms_select_active_mode(p->kms, container_fps);
+    crtc_release(ctx);
+    if (!crtc_setup(ctx)) {
+        MP_ERR(ctx, "Failed to set CRTC for connector %u: %s\n",
+               p->kms->connector->connector_id, mp_strerror(errno));
+        return false;
+    }
+
     ctx->vo->dwidth  = p->fb->width;
     ctx->vo->dheight = p->fb->height;
     ra_gl_ctx_resize(ctx->swapchain, p->fb->width, p->fb->height, 0);

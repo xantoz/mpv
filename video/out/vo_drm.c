@@ -153,8 +153,8 @@ static bool fb_setup_double_buffering(struct vo *vo)
 
     p->front_buf = 0;
     for (unsigned int i = 0; i < 2; i++) {
-        p->bufs[i].width = p->kms->mode.mode.hdisplay;
-        p->bufs[i].height = p->kms->mode.mode.vdisplay;
+        p->bufs[i].width = p->kms->active_mode->mode.hdisplay;
+        p->bufs[i].height = p->kms->active_mode->mode.vdisplay;
     }
 
     for (unsigned int i = 0; i < BUF_COUNT; i++) {
@@ -186,7 +186,7 @@ static bool crtc_setup(struct vo *vo)
     int ret = drmModeSetCrtc(p->kms->fd, p->kms->crtc_id,
                              p->bufs[MOD(p->front_buf - 1, BUF_COUNT)].fb,
                              0, 0, &p->kms->connector->connector_id, 1,
-                             &p->kms->mode.mode);
+                             &p->kms->active_mode->mode);
     p->active = true;
     return ret == 0;
 }
@@ -310,6 +310,23 @@ static int reconfig(struct vo *vo, struct mp_image_params *params)
 
     vo->want_redraw = true;
     return 0;
+}
+
+
+static int reconfig2(struct vo *vo, struct mp_image *img)
+{
+    printf("nominal_fps: %f\n", img->nominal_fps);
+
+    struct priv *p = vo->priv;
+    if (img->nominal_fps > 0.0)
+        kms_select_active_mode(p->kms, img->nominal_fps);
+    crtc_release(vo);
+    if (!crtc_setup(vo)) {
+        MP_ERR(vo, "Cannot set CRTC: %s\n", mp_strerror(errno));
+        return false;
+    }
+
+    return reconfig(vo, &img->params);
 }
 
 static void draw_image(struct vo *vo, mp_image_t *mpi)
@@ -440,11 +457,6 @@ static int preinit(struct vo *vo)
     p->screen_w = p->bufs[0].width;
     p->screen_h = p->bufs[0].height;
 
-    if (!crtc_setup(vo)) {
-        MP_ERR(vo, "Cannot set CRTC: %s\n", mp_strerror(errno));
-        goto err;
-    }
-
     if (vo->opts->force_monitor_aspect != 0.0) {
         vo->monitor_par = p->screen_w / (double) p->screen_h /
                           vo->opts->force_monitor_aspect;
@@ -497,7 +509,7 @@ const struct vo_driver video_out_drm = {
     .description = "Direct Rendering Manager",
     .preinit = preinit,
     .query_format = query_format,
-    .reconfig = reconfig,
+    .reconfig2 = reconfig2,
     .control = control,
     .draw_image = draw_image,
     .flip_page = flip_page,
