@@ -499,6 +499,14 @@ Available video output drivers are:
 
         Use ``--drm-mode=help`` to get a list of available modes for all active connectors.
 
+    ``--drm-atomic=<no|auto>``
+        Toggle use of atomic modesetting.
+
+        :no:    Use legacy modesetting.
+        :auto:  Use atomic modesetting, falling back to legacy modesetting if not available. (default)
+
+        Note: Only affects ``gpu-context=drm``. ``vo=drm`` supports legacy modesetting only.
+
     ``--drm-osd-plane-id=<primary|overlay|N>``
         Select the DRM plane to use for OSD (or OSD and video). The plane can be
         specified as ``primary``, which will pick the first applicable primary

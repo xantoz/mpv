@@ -57,6 +57,9 @@ const struct m_sub_options drm_conf = {
                             0, drm_validate_connector_opt),
         OPT_STRING_VALIDATE("drm-mode", drm_mode_spec,
                             0, drm_validate_mode_opt),
+        OPT_CHOICE("drm-atomic", drm_atomic, 0,
+                   ({"no", 0},
+                    {"auto", 1})),
         OPT_CHOICE_OR_INT("drm-osd-plane-id", drm_osd_plane_id, 0, 0, INT_MAX,
                           ({"primary", DRM_OPTS_PRIMARY_PLANE},
                            {"overlay", DRM_OPTS_OVERLAY_PLANE})),
@@ -71,6 +74,7 @@ const struct m_sub_options drm_conf = {
     },
     .defaults = &(const struct drm_opts) {
         .drm_mode_spec = "preferred",
+        .drm_atomic = 1,
         .drm_osd_plane_id = DRM_OPTS_PRIMARY_PLANE,
         .drm_video_plane_id = DRM_OPTS_OVERLAY_PLANE,
     },
@@ -487,9 +491,9 @@ static void parse_connector_spec(struct mp_log *log,
     }
 }
 
-
 struct kms *kms_create(struct mp_log *log, const char *connector_spec,
-                       const char *mode_spec, int osd_plane_id, int video_plane_id)
+                       const char *mode_spec, int osd_plane_id, int video_plane_id,
+                       bool use_atomic)
 {
     int card_no = -1;
     char *connector_name = NULL;
@@ -532,8 +536,10 @@ struct kms *kms_create(struct mp_log *log, const char *connector_spec,
         mp_err(log, "Failed to set Universal planes capability\n");
     }
 
-    if (drmSetClientCap(kms->fd, DRM_CLIENT_CAP_ATOMIC, 1)) {
-        mp_verbose(log, "No DRM Atomic support found\n");
+    if (!use_atomic) {
+        mp_verbose(log, "Using Legacy Modesetting\n");
+    } else if (drmSetClientCap(kms->fd, DRM_CLIENT_CAP_ATOMIC, 1)) {
+        mp_verbose(log, "No DRM Atomic support found. Falling back to legacy modesetting\n");
     } else {
         mp_verbose(log, "DRM Atomic support found\n");
         kms->atomic_context = drm_atomic_create_context(kms->log, kms->fd, kms->crtc_id,

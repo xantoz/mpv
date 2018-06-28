@@ -585,7 +585,8 @@ static bool drm_egl_init(struct ra_ctx *ctx)
     p->kms = kms_create(ctx->log, ctx->vo->opts->drm_opts->drm_connector_spec,
                         ctx->vo->opts->drm_opts->drm_mode_spec,
                         ctx->vo->opts->drm_opts->drm_osd_plane_id,
-                        ctx->vo->opts->drm_opts->drm_video_plane_id);
+                        ctx->vo->opts->drm_opts->drm_video_plane_id,
+                        ctx->vo->opts->drm_opts->drm_atomic);
     if (!p->kms) {
         MP_ERR(ctx, "Failed to create KMS.\n");
         return false;
