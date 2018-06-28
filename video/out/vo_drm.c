@@ -45,7 +45,7 @@
 
 #define BYTES_PER_PIXEL 4
 #define BITS_PER_PIXEL 32
-#define USE_MASTER 0
+#define USE_MASTER 1
 
 struct framebuffer {
     uint32_t width;
