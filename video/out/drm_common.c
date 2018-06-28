@@ -311,7 +311,7 @@ static bool parse_mode_spec(const char *spec, struct drm_mode_spec *parse_result
     double refresh;
     switch (refresh_part[0]) {
     case '\0':
-        refresh = 0.0;
+        refresh = nan("");
         break;
     case '@':
         refresh_part += 1;
@@ -353,7 +353,7 @@ static bool mode_match(const drmModeModeInfo *mode,
                        unsigned int height,
                        double refresh)
 {
-    if (refresh == 0.0) { // Exact compare is fine, because we check whether or not refresh has been set
+    if (isnan(refresh)) {
         return
             (mode->hdisplay == width) &&
             (mode->vdisplay == height);
