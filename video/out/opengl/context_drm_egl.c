@@ -456,7 +456,7 @@ static void drm_egl_swap_buffers(struct ra_ctx *ctx)
             MP_WARN(ctx->vo, "Failed to commit atomic request (%d)\n", ret);
     } else {
         ret = drmModePageFlip(p->kms->fd, p->kms->crtc_id, p->fb->id,
-                                  DRM_MODE_PAGE_FLIP_EVENT, p);
+                              DRM_MODE_PAGE_FLIP_EVENT, p);
         if (ret) {
             MP_WARN(ctx->vo, "Failed to queue page flip: %s\n", mp_strerror(errno));
         }
@@ -522,10 +522,10 @@ static void drm_egl_uninit(struct ra_ctx *ctx)
 }
 
 // If the OSD plane supports ARGB we want to use that, but if it doesn't we fall
-// back on XRGB. If the driver does not support atomic there is no particular
-// reason to be using ARGB (drmprime hwdec will not work without atomic,
-// anyway), so we fall back to XRGB (another reason is that we do not have the
-// convenient atomic_ctx and its convenient plane fields).
+// back on XRGB. If we do not have atomic there is no particular reason to be
+// using ARGB (drmprime hwdec will not work without atomic, anyway), so we fall
+// back to XRGB (another reason is that we do not have the convenient atomic_ctx
+// and its convenient plane fields).
 static bool probe_gbm_format(struct ra_ctx *ctx, uint32_t argb_format, uint32_t xrgb_format)
 {
     struct priv *p = ctx->priv;
@@ -587,7 +587,8 @@ static bool drm_egl_init(struct ra_ctx *ctx)
     p->kms = kms_create(ctx->log, ctx->vo->opts->drm_opts->drm_connector_spec,
                         ctx->vo->opts->drm_opts->drm_mode_spec,
                         ctx->vo->opts->drm_opts->drm_osd_plane_id,
-                        ctx->vo->opts->drm_opts->drm_video_plane_id);
+                        ctx->vo->opts->drm_opts->drm_video_plane_id,
+                        ctx->vo->opts->drm_opts->drm_atomic);
     if (!p->kms) {
         MP_ERR(ctx, "Failed to create KMS.\n");
         return false;
