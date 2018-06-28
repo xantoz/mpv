@@ -20,6 +20,8 @@ Interface changes
 ::
 
  --- mpv 0.30.0 ---
+    - add `--drm-atomic` to allow explicitly turning atomic modesetting off even
+      when it is available.
     - rename `--drm-osd-plane-id` to `--drm-draw-plane`, `--drm-video-plane-id` to
       `--drm-drmprime-video-plane` and `--drm-osd-size` to `--drm-draw-surface-size`
       to better reflect what the options actually control, that the values they
