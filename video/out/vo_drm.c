@@ -38,7 +38,7 @@
 #define IMGFMT IMGFMT_BGR0
 #define BYTES_PER_PIXEL 4
 #define BITS_PER_PIXEL 32
-#define USE_MASTER 0
+#define USE_MASTER 1
 #define BUF_COUNT 2
 
 // Modulo that works correctly for negative numbers
