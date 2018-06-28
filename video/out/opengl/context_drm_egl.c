@@ -37,7 +37,7 @@
 #include "common.h"
 #include "context.h"
 
-#define USE_MASTER 0
+#define USE_MASTER 1
 
 struct framebuffer
 {
