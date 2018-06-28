@@ -44,7 +44,7 @@
 #define EGL_PLATFORM_GBM_KHR 0x31D7
 #endif
 
-#define USE_MASTER 0
+#define USE_MASTER 1
 
 struct framebuffer
 {
