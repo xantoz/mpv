@@ -269,15 +269,16 @@ struct drm_atomic_context *drm_atomic_create_context(struct mp_log *log, int fd,
             mp_verbose(log, "Using %s plane %d for video\n", plane_type, video_plane_id);
             ctx->video_plane = drm_object_create(log, ctx->fd, video_plane_id, DRM_MODE_OBJECT_PLANE);
         } else {
-            mp_err(log, "Failed to find video plane with idx=%d\n", video_plane_idx);
-            goto fail;
+            mp_verbose(log, "Failed to find video plane with idx=%d. drmprime-drm hwdec interop will not work\n", video_plane_idx);
         }
     } else {
         mp_verbose(log, "Found video plane with ID %d\n", ctx->video_plane->id);
     }
 
-    mp_verbose(log, "Found Video plane with ID %d, OSD with ID %d\n",
-               ctx->video_plane->id, ctx->osd_plane->id);
+    if (ctx->video_plane) {
+        mp_verbose(log, "Found Video plane with ID %d, OSD with ID %d\n",
+                   ctx->video_plane->id, ctx->osd_plane->id);
+    }
 
     drmModeFreePlaneResources(plane_res);
     drmModeFreeResources(res);
@@ -388,8 +389,10 @@ bool drm_atomic_save_old_state(struct drm_atomic_context *ctx)
 
     if (!drm_atomic_save_plane_state(ctx->osd_plane, &ctx->old_state.osd_plane))
         ret = false;
-    if (!drm_atomic_save_plane_state(ctx->video_plane, &ctx->old_state.video_plane))
-        ret = false;
+    if (ctx->video_plane) {
+        if (!drm_atomic_save_plane_state(ctx->video_plane, &ctx->old_state.video_plane))
+            ret = false;
+    }
 
     ctx->old_state.saved = true;
 
@@ -415,8 +418,10 @@ bool drm_atomic_restore_old_state(drmModeAtomicReqPtr request, struct drm_atomic
 
     if (!drm_atomic_restore_plane_state(request, ctx->osd_plane, &ctx->old_state.osd_plane))
         ret = false;
-    if (!drm_atomic_restore_plane_state(request, ctx->video_plane, &ctx->old_state.video_plane))
-        ret = false;
+    if (ctx->video_plane) {
+        if (!drm_atomic_restore_plane_state(request, ctx->video_plane, &ctx->old_state.video_plane))
+            ret = false;
+    }
 
     ctx->old_state.saved = false;
 
