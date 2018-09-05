@@ -507,7 +507,7 @@ Available video output drivers are:
 
         Note: Only affects ``gpu-context=drm``. ``vo=drm`` supports legacy modesetting only.
 
-    ``--drm-osd-plane-id=<primary|overlay|N>``
+    ``--drm-osd-plane=<primary|overlay|N>``
         Select the DRM plane to use for OSD (or OSD and video). The plane can be
         specified as ``primary``, which will pick the first applicable primary
         plane; ``overlay``, which will pick the first applicable overlay plane;
@@ -516,9 +516,9 @@ Available video output drivers are:
         contents. Otherwise it will set OSD & video plane.
         (default: primary)
 
-    ``--drm-video-plane-id=<primary|overlay|N>``
+    ``--drm-video-plane=<primary|overlay|N>``
         Select the DRM plane index to use for video layer. This option accepts
-        the same values as ``--drm-osd-plane-id``. This option has an effect
+        the same values as ``--drm-osd-plane``. This option has an effect
         only when using the drm_prime renderer (which supports several layers)
         together with ``vo=gpu`` and ``gpu-context=drm``.
         (default: overlay)
