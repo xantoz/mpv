@@ -240,14 +240,14 @@ static void uninit(struct ra_hwdec *hw)
 static int init(struct ra_hwdec *hw)
 {
     struct priv *p = hw->priv;
-    int osd_plane_id, video_plane_id;
+    int osd_plane, video_plane;
 
     p->log = hw->log;
 
     void *tmp = talloc_new(NULL);
     struct drm_opts *opts = mp_get_config_group(tmp, hw->global, &drm_conf);
-    osd_plane_id = opts->drm_osd_plane_id;
-    video_plane_id = opts->drm_video_plane_id;
+    osd_plane = opts->drm_osd_plane;
+    video_plane = opts->drm_video_plane;
     talloc_free(tmp);
 
     struct mpv_opengl_drm_params *drm_params;
@@ -255,13 +255,13 @@ static int init(struct ra_hwdec *hw)
     drm_params = ra_get_native_resource(hw->ra, "drm_params");
     if (drm_params) {
         p->ctx = drm_atomic_create_context(p->log, drm_params->fd, drm_params->crtc_id,
-                                           drm_params->connector_id, osd_plane_id, video_plane_id);
+                                           drm_params->connector_id, osd_plane, video_plane);
         if (!p->ctx) {
             mp_err(p->log, "Failed to retrieve DRM atomic context.\n");
             goto err;
         }
         if (!p->ctx->video_plane) {
-            mp_warn(p->log, "No video plane. You might need to specify it manually using --drm-video-plane-id\n");
+            mp_warn(p->log, "No video plane. You might need to specify it manually using --drm-video-plane\n");
             goto err;
         }
     } else {
