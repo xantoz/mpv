@@ -232,13 +232,16 @@ static void update_framebuffer_from_bo(struct ra_ctx *ctx, struct gbm_bo *bo)
     fb->height = gbm_bo_get_height(bo);
     uint32_t stride = gbm_bo_get_stride(bo);
     uint32_t handle = gbm_bo_get_handle(bo).u32;
+    uint32_t format = gbm_bo_get_format(bo);
+    uint64_t modifier = gbm_bo_get_modifier(bo);
 
-    int ret = drmModeAddFB2(fb->fd, fb->width, fb->height,
-                            p->gbm_format,
-                            (uint32_t[4]){handle, 0, 0, 0},
-                            (uint32_t[4]){stride, 0, 0, 0},
-                            (uint32_t[4]){0, 0, 0, 0},
-                            &fb->id, 0);
+    int ret = drmModeAddFB2WithModifiers(fb->fd, fb->width, fb->height,
+                                         format,
+                                         (uint32_t[4]){handle, 0, 0, 0},
+                                         (uint32_t[4]){stride, 0, 0, 0},
+                                         (uint32_t[4]){0, 0, 0, 0},
+                                         (uint64_t[4]){modifier, 0, 0, 0},
+                                         &fb->id, DRM_MODE_FB_MODIFIERS);
 
     if (ret) {
         MP_ERR(ctx->vo, "Failed to create framebuffer: %s\n", mp_strerror(errno));
