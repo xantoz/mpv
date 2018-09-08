@@ -36,11 +36,7 @@
 #include "vo.h"
 
 #define IMGFMT_XRGB8888 IMGFMT_BGR0
-#if BYTE_ORDER == BIG_ENDIAN
-#define IMGFMT_XRGB2101010 pixfmt2imgfmt(AV_PIX_FMT_GBRP10BE)
-#else
 #define IMGFMT_XRGB2101010 pixfmt2imgfmt(AV_PIX_FMT_GBRP10LE)
-#endif
 
 #define BYTES_PER_PIXEL 4
 #define BITS_PER_PIXEL 32
