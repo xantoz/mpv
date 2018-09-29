@@ -139,6 +139,9 @@ static int control(struct ao *ao, enum aocontrol cmd, void *arg)
 {
     struct priv *p = ao->priv;
     snd_mixer_t *handle = NULL;
+
+    MP_INFO(ao, "control()\n");
+
     switch (cmd) {
     case AOCONTROL_GET_MUTE:
     case AOCONTROL_SET_MUTE:
@@ -632,6 +635,8 @@ static void uninit(struct ao *ao)
 {
     struct priv *p = ao->priv;
 
+    MP_INFO(ao, "uninit()\n");
+
     if (p->output)
         snd_output_close(p->output);
     p->output = NULL;
@@ -885,6 +890,8 @@ static int init(struct ao *ao)
     struct priv *p = ao->priv;
     p->opts = mp_get_config_group(ao, ao->global, &ao_alsa_conf);
 
+    MP_INFO(ao, "init()\n");
+
     if (!p->opts->ni)
         ao->format = af_fmt_from_planar(ao->format);
 
@@ -933,12 +940,17 @@ static int init(struct ao *ao)
 static void drain(struct ao *ao)
 {
     struct priv *p = ao->priv;
+
+    MP_INFO(ao, "drain()\n");
+
     snd_pcm_drain(p->alsa);
 }
 
 static int get_space(struct ao *ao)
 {
     struct priv *p = ao->priv;
+
+    MP_INFO(ao, "get_space()\n");
 
     // in case of pausing or the device still being configured,
     // just return our buffer size.
@@ -979,6 +991,8 @@ static double get_delay(struct ao *ao)
     struct priv *p = ao->priv;
     snd_pcm_sframes_t delay;
 
+    MP_INFO(ao, "get_delay()\n");
+
     if (p->paused)
         return p->delay_before_pause;
 
@@ -1012,6 +1026,8 @@ static void audio_pause(struct ao *ao)
 {
     struct priv *p = ao->priv;
     int err;
+
+    MP_INFO(ao, "audio_pause()\n");
 
     if (p->paused)
         return;
@@ -1055,6 +1071,8 @@ static void audio_resume(struct ao *ao)
     struct priv *p = ao->priv;
     int err;
 
+    MP_INFO(ao, "audio_resume()\n");
+
     if (!p->paused)
         return;
 
@@ -1086,6 +1104,8 @@ static void reset(struct ao *ao)
     struct priv *p = ao->priv;
     int err;
 
+    MP_INFO(ao, "reset()\n");
+
     p->paused = false;
     p->prepause_frames = 0;
     p->delay_before_pause = 0;
@@ -1106,6 +1126,9 @@ static int play(struct ao *ao, void **data, int samples, int flags)
 {
     struct priv *p = ao->priv;
     snd_pcm_sframes_t res = 0;
+
+    MP_INFO(ao, "play()\n");
+
     if (!(flags & AOPLAY_FINAL_CHUNK))
         samples = samples / p->outburst * p->outburst;
 
@@ -1155,6 +1178,8 @@ static int audio_wait(struct ao *ao, pthread_mutex_t *lock)
 {
     struct priv *p = ao->priv;
     int err;
+
+    MP_INFO(ao, "audio_wait()\n");
 
     int num_fds = snd_pcm_poll_descriptors_count(p->alsa);
     if (num_fds <= 0 || num_fds >= MAX_POLL_FDS)
@@ -1208,6 +1233,9 @@ static bool is_useless_device(char *name)
 static void list_devs(struct ao *ao, struct ao_device_list *list)
 {
     void **hints;
+
+    MP_INFO(ao, "list_devs()\n");
+
     if (snd_device_name_hint(-1, "pcm", &hints) < 0)
         return;
 
