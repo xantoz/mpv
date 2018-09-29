@@ -1153,8 +1153,9 @@ static int play(struct ao *ao, void **data, int samples, int flags)
             } else if (res == -EPIPE) {
                 // For some reason, writing a smaller fragment at the end
                 // immediately underruns.
-                if (!(flags & AOPLAY_FINAL_CHUNK))
-                    MP_WARN(ao, "Device underrun detected.\n");
+                MP_WARN(ao, "Device underrun detected (%s chunk).\n",
+                        (flags & AOPLAY_FINAL_CHUNK) ?
+                        "final" : "non-final");
             } else {
                 MP_ERR(ao, "Write error: %s\n", snd_strerror(res));
             }
