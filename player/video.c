@@ -975,6 +975,26 @@ static void calculate_frame_duration(struct MPContext *mpctx)
     MP_STATS(mpctx, "value %f frame-duration-approx", MPMAX(0, approx_duration));
 }
 
+static const char* playback_status_to_str(enum playback_status status)
+{
+    switch (status) {
+    case STATUS_SYNCING:
+        return "syncing";
+    case STATUS_FILLING:
+        return "filling";
+    case STATUS_READY:
+        return "ready";
+    case STATUS_PLAYING:
+        return "playing";
+    case STATUS_DRAINING:
+        return "draining";
+    case STATUS_EOF:
+        return "eof";
+    default:
+        return "unknown";
+    }
+}
+
 void write_video(struct MPContext *mpctx)
 {
     struct MPOpts *opts = mpctx->opts;
@@ -1049,7 +1069,8 @@ void write_video(struct MPContext *mpctx)
             }
         }
 
-        MP_DBG(mpctx, "video EOF (status=%d)\n", mpctx->video_status);
+        MP_DBG(mpctx, "video EOF (status=%d, %s)\n", mpctx->video_status,
+               playback_status_to_str(mpctx->video_status));
         return;
     }
 
