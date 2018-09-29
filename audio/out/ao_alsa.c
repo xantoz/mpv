@@ -1127,7 +1127,8 @@ static int play(struct ao *ao, void **data, int samples, int flags)
     struct priv *p = ao->priv;
     snd_pcm_sframes_t res = 0;
 
-    MP_INFO(ao, "play()\n");
+    MP_INFO(ao, "play(samples: %d, final_chunk: %s)\n",
+            samples, (flags & AOPLAY_FINAL_CHUNK) ? "yes": "no");
 
     if (!(flags & AOPLAY_FINAL_CHUNK))
         samples = samples / p->outburst * p->outburst;
