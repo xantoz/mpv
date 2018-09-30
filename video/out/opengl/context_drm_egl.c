@@ -59,6 +59,12 @@ struct egl
     EGLDisplay display;
     EGLContext context;
     EGLSurface surface;
+
+    PFNEGLCREATESYNCKHRPROC eglCreateSyncKHR;
+    PFNEGLDESTROYSYNCKHRPROC eglDestroySyncKHR;
+    PFNEGLWAITSYNCKHRPROC eglWaitSyncKHR;
+    PFNEGLCLIENTWAITSYNCKHRPROC eglClientWaitSyncKHR;
+    PFNEGLDUPNATIVEFENCEFDANDROIDPROC eglDupNativeFenceFDANDROID;
 };
 
 struct priv {
@@ -568,6 +574,34 @@ static bool probe_gbm_format(struct ra_ctx *ctx, uint32_t argb_format, uint32_t 
     return result;
 }
 
+static bool load_extensions(struct ra_ctx *ctx)
+{
+    struct priv *p = ctx->priv;
+
+    if (!(p->egl.eglCreateSyncKHR = (PFNEGLCREATESYNCKHRPROC)eglGetProcAddress("eglCreateSyncKHR")))  {
+        MP_ERR(ctx->vo, "Missing extension eglCreateSyncKHR\n");
+        return false;
+    }
+    if (!(p->egl.eglDestroySyncKHR = (PFNEGLDESTROYSYNCKHRPROC)eglGetProcAddress("eglDestroySyncKHR"))) {
+        MP_ERR(ctx->vo, "Missing extension eglDestroySyncKHR\n");
+        return false;
+    }
+    if (!(p->egl.eglWaitSyncKHR = (PFNEGLWAITSYNCKHRPROC)eglGetProcAddress("eglWaitSyncKHR"))) {
+        MP_ERR(ctx->vo, "Missing extension eglWaitSyncKHR\n");
+        return false;
+    }
+    if (!(p->egl.eglClientWaitSyncKHR = (PFNEGLCLIENTWAITSYNCKHRPROC)eglGetProcAddress("eglClientWaitSyncKHR"))) {
+        MP_ERR(ctx->vo, "Missing extension eglClientWaitSyncK|HR\n");
+        return false;
+    }
+    if (!(p->egl.eglDupNativeFenceFDANDROID = (PFNEGLDUPNATIVEFENCEFDANDROIDPROC)eglGetProcAddress("eglDupNativeFenceFDANDROID"))) {
+        MP_ERR(ctx->vo, "Missing extension eglDupNativeFenceFDANDROID\n");
+        return false;
+    }
+
+    return true;
+}
+
 static bool drm_egl_init(struct ra_ctx *ctx)
 {
     if (ctx->opts.probing) {
@@ -644,6 +678,11 @@ static bool drm_egl_init(struct ra_ctx *ctx)
     }
 
     mpegl_load_functions(&p->gl, ctx->vo->log);
+
+    // TODO: need to check if extensions exist first (make a helper?)
+    if (!load_extensions(ctx))
+        return false;
+
     // required by gbm_surface_lock_front_buffer
     eglSwapBuffers(p->egl.display, p->egl.surface);
 
