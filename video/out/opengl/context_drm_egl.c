@@ -39,6 +39,8 @@
 
 #define USE_MASTER 0
 
+#define VOID2U64(x) ((uint64_t)(unsigned long)(x))
+
 struct framebuffer
 {
     int fd;
@@ -88,6 +90,11 @@ struct priv {
 
     struct mpv_opengl_drm_params drm_params;
     struct mpv_opengl_drm_osd_size osd_size;
+
+    uint32_t atomic_commit_flags;
+    int kms_in_fence_fd;
+    int kms_out_fence_fd;
+    EGLSyncKHR kms_fence; /* in-fence to gpu, out-fence from kms */
 };
 
 // Not general. Limited to only the formats being used in this module
@@ -258,6 +265,8 @@ static void update_framebuffer_from_bo(struct ra_ctx *ctx, struct gbm_bo *bo)
 
 static bool crtc_setup_atomic(struct ra_ctx *ctx)
 {
+    return false;
+
     struct priv *p = ctx->priv;
     struct drm_atomic_context *atomic_ctx = p->kms->atomic_context;
 
@@ -314,6 +323,8 @@ static bool crtc_setup_atomic(struct ra_ctx *ctx)
 
 static bool crtc_release_atomic(struct ra_ctx *ctx)
 {
+    return false;
+
     struct priv *p = ctx->priv;
 
     struct drm_atomic_context *atomic_ctx = p->kms->atomic_context;
@@ -423,23 +434,121 @@ static void acquire_vt(void *data)
     crtc_setup(ctx);
 }
 
+static EGLSyncKHR create_fence(const struct egl *egl, int fd)
+{
+    EGLint attrib_list[] = {
+        EGL_SYNC_NATIVE_FENCE_FD_ANDROID, fd,
+        EGL_NONE,
+    };
+    EGLSyncKHR fence = egl->eglCreateSyncKHR(egl->display,
+                                             EGL_SYNC_NATIVE_FENCE_ANDROID, attrib_list);
+    return fence;
+}
+
 static bool drm_atomic_egl_start_frame(struct ra_swapchain *sw, struct ra_fbo *out_fbo)
 {
     struct priv *p = sw->ctx->priv;
-    if (p->kms->atomic_context) {
-        if (!p->kms->atomic_context->request) {
-            p->kms->atomic_context->request = drmModeAtomicAlloc();
-            p->drm_params.atomic_request_ptr = &p->kms->atomic_context->request;
-        }
-        return ra_gl_ctx_start_frame(sw, out_fbo);
+    if (!p->kms->atomic_context)
+        return false;
+
+    if (!p->kms->atomic_context->request) {
+        p->kms->atomic_context->request = drmModeAtomicAlloc();
+        p->drm_params.atomic_request_ptr = &p->kms->atomic_context->request;
     }
-    return false;
+
+    if (p->kms_out_fence_fd != -1) {
+        p->kms_fence = create_fence(&p->egl, p->kms_out_fence_fd);
+        if (!p->kms_fence) {
+            MP_ERR(sw->ctx->vo, "Couldn't create KMS fence\n");
+            // TODO: signal a fail condition somehow
+        }
+
+        /* driver now has ownership of the fence fd: */
+        p->kms_out_fence_fd = -1;
+
+        /* wait "on the gpu" (ie. this won't necessarily block, but
+         * will block the rendering until fence is signaled), until
+         * the previous pageflip completes so we don't render into
+         * the buffer that is still on screen.
+         */
+        p->egl.eglWaitSyncKHR(p->egl.display, p->kms_fence, 0);
+    }
+
+    return ra_gl_ctx_start_frame(sw, out_fbo);
+}
+
+static bool drm_atomic_commit(struct ra_ctx *ctx, uint32_t flags)
+{
+    struct priv *p = ctx->priv;
+    struct drm_atomic_context *atomic_ctx = p->kms->atomic_context;
+
+    if (flags & DRM_MODE_ATOMIC_ALLOW_MODESET) {
+        if (drm_object_set_property(atomic_ctx->request,
+                                    atomic_ctx->connector, "CRTC_ID", p->kms->crtc_id) < 0) {
+            MP_ERR(ctx->vo, "Failed to set CRTC_ID on connector\n");
+            return false;
+        }
+
+        if (!drm_mode_ensure_blob(p->kms->fd, &p->kms->mode)) {
+            MP_ERR(ctx->vo, "Failed to create DRM mode blob\n");
+            return false;
+        }
+
+        if (drm_object_set_property(atomic_ctx->request,
+                                    atomic_ctx->crtc, "MODE_ID", p->kms->mode.blob_id) < 0) {
+            MP_ERR(ctx->vo, "Could not set MODE_ID on crtc\n");
+            return false;
+        }
+
+        if (drm_object_set_property(atomic_ctx->request, atomic_ctx->crtc, "ACTIVE", 1) < 0) {
+            MP_ERR(ctx->vo, "Could not set ACTIVE on crtc\n");
+            return false;
+        }
+    }
+
+    drm_object_set_property(atomic_ctx->request, atomic_ctx->osd_plane, "FB_ID",   p->fb->id);
+    drm_object_set_property(atomic_ctx->request, atomic_ctx->osd_plane, "CRTC_ID", p->kms->crtc_id);
+    drm_object_set_property(atomic_ctx->request, atomic_ctx->osd_plane, "SRC_X",   0);
+    drm_object_set_property(atomic_ctx->request, atomic_ctx->osd_plane, "SRC_Y",   0);
+    drm_object_set_property(atomic_ctx->request, atomic_ctx->osd_plane, "SRC_W",   p->osd_size.width << 16);
+    drm_object_set_property(atomic_ctx->request, atomic_ctx->osd_plane, "SRC_H",   p->osd_size.height << 16);
+    drm_object_set_property(atomic_ctx->request, atomic_ctx->osd_plane, "CRTC_X",  0);
+    drm_object_set_property(atomic_ctx->request, atomic_ctx->osd_plane, "CRTC_Y",  0);
+    drm_object_set_property(atomic_ctx->request, atomic_ctx->osd_plane, "CRTC_W",  p->kms->mode.mode.hdisplay);
+    drm_object_set_property(atomic_ctx->request, atomic_ctx->osd_plane, "CRTC_H",  p->kms->mode.mode.vdisplay);
+
+    if (p->kms_in_fence_fd != -1) {
+        drm_object_set_property(atomic_ctx->request,
+                                atomic_ctx->crtc, "OUT_FENCE_PTR", VOID2U64(&p->kms_out_fence_fd));
+        drm_object_set_property(atomic_ctx->request,
+                                atomic_ctx->osd_plane, "IN_FENCE_FD", p->kms_in_fence_fd);
+    }
+
+    int ret = drmModeAtomicCommit(p->kms->fd, atomic_ctx->request, flags, NULL);
+    if (ret) {
+        MP_WARN(ctx->vo, "Failed to commit atomic request (%d)\n", ret);
+        goto out;
+    }
+
+    if (p->kms_in_fence_fd != -1) {
+        close(p->kms_in_fence_fd);
+        p->kms_in_fence_fd = -1;
+    }
+
+out:
+    if (atomic_ctx) {
+        drmModeAtomicFree(atomic_ctx->request);
+        atomic_ctx->request = drmModeAtomicAlloc();
+    }
+
+    return (ret == 0);
 }
 
 static const struct ra_swapchain_fns drm_atomic_swapchain = {
     .start_frame   = drm_atomic_egl_start_frame,
 };
 
+#if 0
 static void drm_egl_swap_buffers(struct ra_ctx *ctx)
 {
     struct priv *p = ctx->priv;
@@ -475,8 +584,8 @@ static void drm_egl_swap_buffers(struct ra_ctx *ctx)
     const int timeout_ms = 3000;
     struct pollfd fds[1] = { { .events = POLLIN, .fd = p->kms->fd } };
     poll(fds, 1, timeout_ms);
-    if (fds[0].revents & POLLIN) {
         ret = drmHandleEvent(p->kms->fd, &p->ev);
+    if (fds[0].revents & POLLIN) {
         if (ret != 0) {
             MP_ERR(ctx->vo, "drmHandleEvent failed: %i\n", ret);
             p->waiting_for_flip = false;
@@ -492,6 +601,82 @@ static void drm_egl_swap_buffers(struct ra_ctx *ctx)
 
     gbm_surface_release_buffer(p->gbm.surface, p->gbm.bo);
     p->gbm.bo = p->gbm.next_bo;
+}
+#endif
+
+static void drm_egl_swap_buffers(struct ra_ctx *ctx)
+{
+    struct priv *p = ctx->priv;
+
+    EGLSyncKHR gpu_fence = NULL;   /* out-fence from gpu, in-fence to kms */
+
+    /* insert fence to be singled in cmdstream.. this fence will be
+     * signaled when gpu rendering done
+     */
+    gpu_fence = create_fence(&p->egl, EGL_NO_NATIVE_FENCE_FD_ANDROID);
+    if (!gpu_fence) {
+        MP_ERR(ctx->vo, "Couldn't create GPU fence\n");
+        return;
+    }
+
+    eglSwapBuffers(p->egl.display, p->egl.surface);
+
+    /* after swapbuffers, gpu_fence should be flushed, so safe
+     * to get fd:
+     */
+    p->kms_in_fence_fd = p->egl.eglDupNativeFenceFDANDROID(p->egl.display, gpu_fence);
+    p->egl.eglDestroySyncKHR(p->egl.display, gpu_fence);
+    /* assert(drm.kms_in_fence_fd != -1); */
+
+/*
+    next_bo = gbm_surface_lock_front_buffer(gbm->surface);
+    if (!next_bo) {
+        printf("Failed to lock frontbuffer\n");
+        return -1;
+    }
+    fb = drm_fb_get_from_bo(next_bo);
+    if (!fb) {
+        printf("Failed to get a new framebuffer BO\n");
+        return -1;
+    }
+*/
+
+    p->gbm.next_bo = gbm_surface_lock_front_buffer(p->gbm.surface);
+    /* p->waiting_for_flip = true; */
+    update_framebuffer_from_bo(ctx, p->gbm.next_bo);
+
+    if (p->kms_fence) {
+        EGLint status;
+
+        /* Wait on the CPU side for the _previous_ commit to complete before we
+         * post the flip through KMS, as atomic will reject the commit if we
+         * post a new one whilst the previous one is still pending.
+         */
+        do {
+            status = p->egl.eglClientWaitSyncKHR(p->egl.display,
+                                                 p->kms_fence,
+                                                 0,
+                                                 EGL_FOREVER_KHR);
+        } while (status != EGL_CONDITION_SATISFIED_KHR);
+
+        p->egl.eglDestroySyncKHR(p->egl.display, p->kms_fence);
+        p->kms_fence = NULL;
+    }
+
+    /*
+     * Here you could also update drm plane layers if you want
+     * hw composition
+     */
+    if (!drm_atomic_commit(ctx, p->atomic_commit_flags)) {
+        MP_WARN(ctx->vo, "drm_atomic_commit failed\n");
+    }
+
+    /* release last buffer to render on again: */
+    gbm_surface_release_buffer(p->gbm.surface, p->gbm.bo);
+    p->gbm.bo = p->gbm.next_bo;
+
+    /* Allow a modeset change for the first commit only. */
+    p->atomic_commit_flags &= ~(DRM_MODE_ATOMIC_ALLOW_MODESET);
 }
 
 static void drm_egl_uninit(struct ra_ctx *ctx)
@@ -599,6 +784,13 @@ static bool load_extensions(struct ra_ctx *ctx)
         return false;
     }
 
+    printf("%p %p %p %p %p\n",
+           p->egl.eglCreateSyncKHR,
+           p->egl.eglDestroySyncKHR,
+           p->egl.eglWaitSyncKHR,
+           p->egl.eglClientWaitSyncKHR,
+           p->egl.eglDupNativeFenceFDANDROID);
+
     return true;
 }
 
@@ -612,6 +804,7 @@ static bool drm_egl_init(struct ra_ctx *ctx)
     struct priv *p = ctx->priv = talloc_zero(ctx, struct priv);
     p->ev.version = DRM_EVENT_CONTEXT_VERSION;
 
+/*
     p->vt_switcher_active = vt_switcher_init(&p->vt_switcher, ctx->vo->log);
     if (p->vt_switcher_active) {
         vt_switcher_acquire(&p->vt_switcher, acquire_vt, ctx);
@@ -619,6 +812,7 @@ static bool drm_egl_init(struct ra_ctx *ctx)
     } else {
         MP_WARN(ctx, "Failed to set up VT switcher. Terminal switching will be unavailable.\n");
     }
+*/
 
     MP_VERBOSE(ctx, "Initializing KMS\n");
     p->kms = kms_create(ctx->log, ctx->vo->opts->drm_opts->drm_connector_spec,
@@ -628,6 +822,11 @@ static bool drm_egl_init(struct ra_ctx *ctx)
                         ctx->vo->opts->drm_opts->drm_atomic);
     if (!p->kms) {
         MP_ERR(ctx, "Failed to create KMS.\n");
+        return false;
+    }
+
+    if (!p->kms->atomic_context) {
+        MP_ERR(ctx, "This PoC is atomic only\n");
         return false;
     }
 
@@ -683,6 +882,13 @@ static bool drm_egl_init(struct ra_ctx *ctx)
     if (!load_extensions(ctx))
         return false;
 
+    // Allow a modeset change for the first commit
+    p->atomic_commit_flags = DRM_MODE_ATOMIC_NONBLOCK | DRM_MODE_ATOMIC_ALLOW_MODESET;
+
+    p->kms_in_fence_fd = -1;
+    p->kms_out_fence_fd = -1;
+
+/*
     // required by gbm_surface_lock_front_buffer
     eglSwapBuffers(p->egl.display, p->egl.surface);
 
@@ -703,12 +909,14 @@ static bool drm_egl_init(struct ra_ctx *ctx)
                p->kms->connector->connector_id, mp_strerror(errno));
         return false;
     }
+*/
 
     p->drm_params.fd = p->kms->fd;
     p->drm_params.crtc_id = p->kms->crtc_id;
     p->drm_params.connector_id = p->kms->connector->connector_id;
     if (p->kms->atomic_context)
         p->drm_params.atomic_request_ptr = &p->kms->atomic_context->request;
+
     char *rendernode_path = drmGetRenderDeviceNameFromFd(p->kms->fd);
     if (rendernode_path) {
         MP_VERBOSE(ctx, "Opening render node \"%s\"\n", rendernode_path);
@@ -740,9 +948,11 @@ static bool drm_egl_init(struct ra_ctx *ctx)
 static bool drm_egl_reconfig(struct ra_ctx *ctx)
 {
     struct priv *p = ctx->priv;
-    ctx->vo->dwidth  = p->fb->width;
-    ctx->vo->dheight = p->fb->height;
-    ra_gl_ctx_resize(ctx->swapchain, p->fb->width, p->fb->height, 0);
+    /* ctx->vo->dwidth  = p->fb->width; */
+    /* ctx->vo->dheight = p->fb->height; */
+    ctx->vo->dwidth = p->osd_size.width;
+    ctx->vo->dheight = p->osd_size.height;
+    ra_gl_ctx_resize(ctx->swapchain, ctx->vo->dwidth, ctx->vo->dheight, 0);
     return true;
 }
 
