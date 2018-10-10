@@ -486,7 +486,8 @@ static bool drm_atomic_egl_submit_frame(struct ra_swapchain *sw, const struct vo
 
     /* p->gl.Flush(); */
     /* p->gl.Finish(); */
-    eglWaitGL();
+    /* eglWaitGL(); */
+    eglWaitClient();
 
     return ra_gl_ctx_submit_frame(sw, frame);
 }
