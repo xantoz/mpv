@@ -95,6 +95,7 @@ struct priv {
     int kms_in_fence_fd;
     int kms_out_fence_fd;
     EGLSyncKHR kms_fence; /* in-fence to gpu, out-fence from kms */
+    EGLSyncKHR gpu_fence;   /* out-fence from gpu, in-fence to kms */
 };
 
 // Not general. Limited to only the formats being used in this module
@@ -477,6 +478,27 @@ static bool drm_atomic_egl_start_frame(struct ra_swapchain *sw, struct ra_fbo *o
     return ra_gl_ctx_start_frame(sw, out_fbo);
 }
 
+static bool drm_atomic_egl_submit_frame(struct ra_swapchain *sw, const struct vo_frame *frame)
+{
+    struct priv *p = sw->ctx->priv;
+    if (!p->kms->atomic_context)
+        return false;
+
+    /* p->gl.Flush(); */
+    /* p->gl.Finish(); */
+    eglWaitGL();
+
+    /* insert fence to be singled in cmdstream.. this fence will be
+     * signaled when gpu rendering done
+     */
+    p->gpu_fence = create_fence(&p->egl, EGL_NO_NATIVE_FENCE_FD_ANDROID);
+    if (!p->gpu_fence) {
+        MP_ERR(sw->ctx->vo, "Couldn't create GPU fence\n");
+    }
+
+    return ra_gl_ctx_submit_frame(sw, frame);
+}
+
 static bool drm_atomic_commit(struct ra_ctx *ctx, uint32_t flags)
 {
     struct priv *p = ctx->priv;
@@ -546,6 +568,7 @@ out:
 
 static const struct ra_swapchain_fns drm_atomic_swapchain = {
     .start_frame   = drm_atomic_egl_start_frame,
+    .submit_frame  = drm_atomic_egl_submit_frame,
 };
 
 #if 0
@@ -608,24 +631,14 @@ static void drm_egl_swap_buffers(struct ra_ctx *ctx)
 {
     struct priv *p = ctx->priv;
 
-    EGLSyncKHR gpu_fence = NULL;   /* out-fence from gpu, in-fence to kms */
-
-    /* insert fence to be singled in cmdstream.. this fence will be
-     * signaled when gpu rendering done
-     */
-    gpu_fence = create_fence(&p->egl, EGL_NO_NATIVE_FENCE_FD_ANDROID);
-    if (!gpu_fence) {
-        MP_ERR(ctx->vo, "Couldn't create GPU fence\n");
-        return;
-    }
-
     eglSwapBuffers(p->egl.display, p->egl.surface);
 
     /* after swapbuffers, gpu_fence should be flushed, so safe
      * to get fd:
      */
-    p->kms_in_fence_fd = p->egl.eglDupNativeFenceFDANDROID(p->egl.display, gpu_fence);
-    p->egl.eglDestroySyncKHR(p->egl.display, gpu_fence);
+    p->kms_in_fence_fd = p->egl.eglDupNativeFenceFDANDROID(p->egl.display, p->gpu_fence);
+    p->egl.eglDestroySyncKHR(p->egl.display, p->gpu_fence);
+    p->gpu_fence = NULL;
     /* assert(drm.kms_in_fence_fd != -1); */
 
 /*
