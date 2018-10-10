@@ -488,14 +488,6 @@ static bool drm_atomic_egl_submit_frame(struct ra_swapchain *sw, const struct vo
     /* p->gl.Finish(); */
     eglWaitGL();
 
-    /* insert fence to be singled in cmdstream.. this fence will be
-     * signaled when gpu rendering done
-     */
-    p->gpu_fence = create_fence(&p->egl, EGL_NO_NATIVE_FENCE_FD_ANDROID);
-    if (!p->gpu_fence) {
-        MP_ERR(sw->ctx->vo, "Couldn't create GPU fence\n");
-    }
-
     return ra_gl_ctx_submit_frame(sw, frame);
 }
 
@@ -631,6 +623,15 @@ static void drm_egl_swap_buffers(struct ra_ctx *ctx)
 {
     struct priv *p = ctx->priv;
 
+    /* insert fence to be singled in cmdstream.. this fence will be
+     * signaled when gpu rendering done
+     */
+    p->gpu_fence = create_fence(&p->egl, EGL_NO_NATIVE_FENCE_FD_ANDROID);
+    if (!p->gpu_fence) {
+        MP_ERR(ctx->vo, "Couldn't create GPU fence\n");
+        return;
+    }
+
     eglSwapBuffers(p->egl.display, p->egl.surface);
 
     /* after swapbuffers, gpu_fence should be flushed, so safe
@@ -639,20 +640,10 @@ static void drm_egl_swap_buffers(struct ra_ctx *ctx)
     p->kms_in_fence_fd = p->egl.eglDupNativeFenceFDANDROID(p->egl.display, p->gpu_fence);
     p->egl.eglDestroySyncKHR(p->egl.display, p->gpu_fence);
     p->gpu_fence = NULL;
-    /* assert(drm.kms_in_fence_fd != -1); */
-
-/*
-    next_bo = gbm_surface_lock_front_buffer(gbm->surface);
-    if (!next_bo) {
-        printf("Failed to lock frontbuffer\n");
-        return -1;
+    if (p->kms_in_fence_fd == -1) {
+        MP_ERR(ctx->vo, "eglDupNativeFenceFDANDROID error\n");
+        return;
     }
-    fb = drm_fb_get_from_bo(next_bo);
-    if (!fb) {
-        printf("Failed to get a new framebuffer BO\n");
-        return -1;
-    }
-*/
 
     p->gbm.next_bo = gbm_surface_lock_front_buffer(p->gbm.surface);
     /* p->waiting_for_flip = true; */
