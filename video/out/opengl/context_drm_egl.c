@@ -457,24 +457,6 @@ static bool drm_atomic_egl_start_frame(struct ra_swapchain *sw, struct ra_fbo *o
         p->drm_params.atomic_request_ptr = &p->kms->atomic_context->request;
     }
 
-    if (p->kms_out_fence_fd != -1) {
-        p->kms_fence = create_fence(&p->egl, p->kms_out_fence_fd);
-        if (!p->kms_fence) {
-            MP_ERR(sw->ctx->vo, "Couldn't create KMS fence\n");
-            // TODO: signal a fail condition somehow
-        }
-
-        /* driver now has ownership of the fence fd: */
-        p->kms_out_fence_fd = -1;
-
-        /* wait "on the gpu" (ie. this won't necessarily block, but
-         * will block the rendering until fence is signaled), until
-         * the previous pageflip completes so we don't render into
-         * the buffer that is still on screen.
-         */
-        p->egl.eglWaitSyncKHR(p->egl.display, p->kms_fence, 0);
-    }
-
     return ra_gl_ctx_start_frame(sw, out_fbo);
 }
 
@@ -484,12 +466,23 @@ static bool drm_atomic_egl_submit_frame(struct ra_swapchain *sw, const struct vo
     if (!p->kms->atomic_context)
         return false;
 
-    /* p->gl.Flush(); */
-    /* p->gl.Finish(); */
-    /* eglWaitGL(); */
-    eglWaitClient();
+    /* int64_t before = mp_time_us(); */
+    /* /\* eglWaitClient(); *\/ */
+    /* /\* p->gl.Finish(); *\/ */
+    /* /\* p->gl.Flush(); *\/ */
+    /* int64_t after = mp_time_us(); */
+    /* printf("diff: %"PRId64"\n", after - before); */
 
-    return ra_gl_ctx_submit_frame(sw, frame);
+    /* insert fence to be singled in cmdstream.. this fence will be
+     * signaled when gpu rendering done
+     */
+    p->gpu_fence = create_fence(&p->egl, EGL_NO_NATIVE_FENCE_FD_ANDROID);
+    if (!p->gpu_fence) {
+        MP_ERR(sw->ctx->vo, "Couldn't create GPU fence\n");
+        return false;
+    }
+
+    return true;
 }
 
 static bool drm_atomic_commit(struct ra_ctx *ctx, uint32_t flags)
@@ -559,11 +552,6 @@ out:
     return (ret == 0);
 }
 
-static const struct ra_swapchain_fns drm_atomic_swapchain = {
-    .start_frame   = drm_atomic_egl_start_frame,
-    .submit_frame  = drm_atomic_egl_submit_frame,
-};
-
 #if 0
 static void drm_egl_swap_buffers(struct ra_ctx *ctx)
 {
@@ -575,6 +563,7 @@ static void drm_egl_swap_buffers(struct ra_ctx *ctx)
         return;
 
     eglSwapBuffers(p->egl.display, p->egl.surface);
+
     p->gbm.next_bo = gbm_surface_lock_front_buffer(p->gbm.surface);
     p->waiting_for_flip = true;
     update_framebuffer_from_bo(ctx, p->gbm.next_bo);
@@ -600,7 +589,7 @@ static void drm_egl_swap_buffers(struct ra_ctx *ctx)
     const int timeout_ms = 3000;
     struct pollfd fds[1] = { { .events = POLLIN, .fd = p->kms->fd } };
     poll(fds, 1, timeout_ms);
-        ret = drmHandleEvent(p->kms->fd, &p->ev);
+    ret = drmHandleEvent(p->kms->fd, &p->ev);
     if (fds[0].revents & POLLIN) {
         if (ret != 0) {
             MP_ERR(ctx->vo, "drmHandleEvent failed: %i\n", ret);
@@ -620,18 +609,10 @@ static void drm_egl_swap_buffers(struct ra_ctx *ctx)
 }
 #endif
 
-static void drm_egl_swap_buffers(struct ra_ctx *ctx)
+static void drm_egl_swap_buffers(struct ra_swapchain *sw)
 {
+    struct ra_ctx *ctx = sw->ctx;
     struct priv *p = ctx->priv;
-
-    /* insert fence to be singled in cmdstream.. this fence will be
-     * signaled when gpu rendering done
-     */
-    p->gpu_fence = create_fence(&p->egl, EGL_NO_NATIVE_FENCE_FD_ANDROID);
-    if (!p->gpu_fence) {
-        MP_ERR(ctx->vo, "Couldn't create GPU fence\n");
-        return;
-    }
 
     eglSwapBuffers(p->egl.display, p->egl.surface);
 
@@ -682,7 +663,37 @@ static void drm_egl_swap_buffers(struct ra_ctx *ctx)
 
     /* Allow a modeset change for the first commit only. */
     p->atomic_commit_flags &= ~(DRM_MODE_ATOMIC_ALLOW_MODESET);
+
+    if (p->kms_out_fence_fd != -1) {
+        p->kms_fence = create_fence(&p->egl, p->kms_out_fence_fd);
+        if (!p->kms_fence) {
+            MP_ERR(sw->ctx->vo, "Couldn't create KMS fence\n");
+            // TODO: signal a fail condition somehow
+        }
+
+        /* driver now has ownership of the fence fd: */
+        p->kms_out_fence_fd = -1;
+
+        /* wait "on the gpu" (ie. this won't necessarily block, but
+         * will block the rendering until fence is signaled), until
+         * the previous pageflip completes so we don't render into
+         * the buffer that is still on screen.
+         */
+        p->egl.eglWaitSyncKHR(p->egl.display, p->kms_fence, 0);
+
+        /* int64_t before = mp_time_us(); */
+        eglWaitClient();
+        /* int64_t after = mp_time_us(); */
+        /* printf("diff: %"PRId64"\n", after - before); */
+    }
+
 }
+
+static const struct ra_swapchain_fns drm_atomic_swapchain = {
+    .start_frame   = drm_atomic_egl_start_frame,
+    .submit_frame  = drm_atomic_egl_submit_frame,
+    .swap_buffers  = drm_egl_swap_buffers,
+};
 
 static void drm_egl_uninit(struct ra_ctx *ctx)
 {
@@ -937,7 +948,7 @@ static bool drm_egl_init(struct ra_ctx *ctx)
     }
 
     struct ra_gl_ctx_params params = {
-        .swap_buffers = drm_egl_swap_buffers,
+        /* .swap_buffers = drm_egl_swap_buffers, */
         .external_swapchain = p->kms->atomic_context ? &drm_atomic_swapchain :
                                                        NULL,
     };
