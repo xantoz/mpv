@@ -467,15 +467,16 @@ static bool drm_atomic_egl_submit_frame(struct ra_swapchain *sw, const struct vo
         return false;
 
     /* int64_t before = mp_time_us(); */
-    /* /\* eglWaitClient(); *\/ */
-    /* /\* p->gl.Finish(); *\/ */
-    /* /\* p->gl.Flush(); *\/ */
+    /* eglWaitClient(); */
+    /* p->gl.Finish(); */
+    /* p->gl.Flush(); */
     /* int64_t after = mp_time_us(); */
     /* printf("diff: %"PRId64"\n", after - before); */
 
     /* insert fence to be singled in cmdstream.. this fence will be
      * signaled when gpu rendering done
      */
+
     p->gpu_fence = create_fence(&p->egl, EGL_NO_NATIVE_FENCE_FD_ANDROID);
     if (!p->gpu_fence) {
         MP_ERR(sw->ctx->vo, "Couldn't create GPU fence\n");
@@ -532,7 +533,7 @@ static bool drm_atomic_commit(struct ra_ctx *ctx, uint32_t flags)
                                 atomic_ctx->osd_plane, "IN_FENCE_FD", p->kms_in_fence_fd);
     }
 
-    int ret = drmModeAtomicCommit(p->kms->fd, atomic_ctx->request, flags, NULL);
+    int ret = drmModeAtomicCommit(p->kms->fd, atomic_ctx->request, flags, p);
     if (ret) {
         MP_WARN(ctx->vo, "Failed to commit atomic request (%d)\n", ret);
         goto out;
@@ -628,34 +629,61 @@ static void drm_egl_swap_buffers(struct ra_swapchain *sw)
     }
 
     p->gbm.next_bo = gbm_surface_lock_front_buffer(p->gbm.surface);
-    /* p->waiting_for_flip = true; */
     update_framebuffer_from_bo(ctx, p->gbm.next_bo);
 
-    if (p->kms_fence) {
-        EGLint status;
+    /* if (p->kms_fence) { */
+    /*     EGLint status; */
 
-        /* Wait on the CPU side for the _previous_ commit to complete before we
-         * post the flip through KMS, as atomic will reject the commit if we
-         * post a new one whilst the previous one is still pending.
-         */
-        do {
-            status = p->egl.eglClientWaitSyncKHR(p->egl.display,
-                                                 p->kms_fence,
-                                                 0,
-                                                 EGL_FOREVER_KHR);
-        } while (status != EGL_CONDITION_SATISFIED_KHR);
+    /*     /\* Wait on the CPU side for the _previous_ commit to complete before we */
+    /*      * post the flip through KMS, as atomic will reject the commit if we */
+    /*      * post a new one whilst the previous one is still pending. */
+    /*      *\/ */
+    /*     do { */
+    /*         status = p->egl.eglClientWaitSyncKHR(p->egl.display, */
+    /*                                              p->kms_fence, */
+    /*                                              0, */
+    /*                                              EGL_FOREVER_KHR); */
+    /*     } while (status != EGL_CONDITION_SATISFIED_KHR); */
 
-        p->egl.eglDestroySyncKHR(p->egl.display, p->kms_fence);
-        p->kms_fence = NULL;
+    /*     p->egl.eglDestroySyncKHR(p->egl.display, p->kms_fence); */
+    /*     p->kms_fence = NULL; */
+    /* } */
+
+    /* if (p->waiting_for_flip) { */
+    /*     // poll page flip finish event */
+    /*     const int timeout_ms = 3000; */
+    /*     struct pollfd fds[1] = { { .events = POLLIN, .fd = p->kms->fd } }; */
+    /*     poll(fds, 1, timeout_ms); */
+    /*     int ret = drmHandleEvent(p->kms->fd, &p->ev); */
+    /*     if (fds[0].revents & POLLIN) { */
+    /*         if (ret != 0) { */
+    /*             MP_ERR(ctx->vo, "drmHandleEvent failed: %i\n", ret); */
+    /*             p->waiting_for_flip = false; */
+    /*             return; */
+    /*         } */
+    /*     } */
+    /*     p->waiting_for_flip = false; */
+    /* } */
+
+    // poll page flip finish event
+    while (p->waiting_for_flip) {
+        int ret = drmHandleEvent(p->kms->fd, &p->ev);
+        if (ret != 0) {
+            MP_ERR(ctx->vo, "drmHandleEvent failed: %i\n", ret);
+            p->waiting_for_flip = false;
+            return;
+        }
     }
 
     /*
      * Here you could also update drm plane layers if you want
      * hw composition
      */
+    p->waiting_for_flip = true;
     if (!drm_atomic_commit(ctx, p->atomic_commit_flags)) {
         MP_WARN(ctx->vo, "drm_atomic_commit failed\n");
     }
+
 
     /* release last buffer to render on again: */
     gbm_surface_release_buffer(p->gbm.surface, p->gbm.bo);
@@ -681,12 +709,14 @@ static void drm_egl_swap_buffers(struct ra_swapchain *sw)
          */
         p->egl.eglWaitSyncKHR(p->egl.display, p->kms_fence, 0);
 
+        p->egl.eglDestroySyncKHR(p->egl.display, p->kms_fence);
+        p->kms_fence = NULL;
+
         /* int64_t before = mp_time_us(); */
-        eglWaitClient();
+        /* eglWaitClient(); */
         /* int64_t after = mp_time_us(); */
         /* printf("diff: %"PRId64"\n", after - before); */
     }
-
 }
 
 static const struct ra_swapchain_fns drm_atomic_swapchain = {
@@ -810,6 +840,12 @@ static bool load_extensions(struct ra_ctx *ctx)
     return true;
 }
 
+static void page_flipped(int fd, unsigned int frame, unsigned int sec,
+                         unsigned int usec, void *data)
+{
+    struct priv *p = data;
+    p->waiting_for_flip = false;
+}
 static bool drm_egl_init(struct ra_ctx *ctx)
 {
     if (ctx->opts.probing) {
@@ -819,6 +855,7 @@ static bool drm_egl_init(struct ra_ctx *ctx)
 
     struct priv *p = ctx->priv = talloc_zero(ctx, struct priv);
     p->ev.version = DRM_EVENT_CONTEXT_VERSION;
+    p->ev.page_flip_handler = page_flipped;
 
 /*
     p->vt_switcher_active = vt_switcher_init(&p->vt_switcher, ctx->vo->log);
@@ -899,7 +936,8 @@ static bool drm_egl_init(struct ra_ctx *ctx)
         return false;
 
     // Allow a modeset change for the first commit
-    p->atomic_commit_flags = DRM_MODE_ATOMIC_NONBLOCK | DRM_MODE_ATOMIC_ALLOW_MODESET;
+    /* p->atomic_commit_flags = DRM_MODE_ATOMIC_NONBLOCK | DRM_MODE_ATOMIC_ALLOW_MODESET; */
+    p->atomic_commit_flags = DRM_MODE_ATOMIC_NONBLOCK | DRM_MODE_PAGE_FLIP_EVENT | DRM_MODE_ATOMIC_ALLOW_MODESET;
 
     p->kms_in_fence_fd = -1;
     p->kms_out_fence_fd = -1;
