@@ -96,6 +96,8 @@ struct priv {
     int kms_out_fence_fd;
     EGLSyncKHR kms_fence; /* in-fence to gpu, out-fence from kms */
     EGLSyncKHR gpu_fence;   /* out-fence from gpu, in-fence to kms */
+
+    EGLSyncKHR fence;
 };
 
 // Not general. Limited to only the formats being used in this module
@@ -457,6 +459,26 @@ static bool drm_atomic_egl_start_frame(struct ra_swapchain *sw, struct ra_fbo *o
         p->drm_params.atomic_request_ptr = &p->kms->atomic_context->request;
     }
 
+    if (p->kms_out_fence_fd != -1) {
+        puts("create kms_fence");
+        p->kms_fence = create_fence(&p->egl, p->kms_out_fence_fd);
+        if (!p->kms_fence) {
+            MP_ERR(sw->ctx->vo, "Couldn't create KMS fence\n");
+            // TODO: signal a fail condition somehow
+        }
+
+        /* driver now has ownership of the fence fd: */
+        p->kms_out_fence_fd = -1;
+
+        puts("eglWaitSyncKHR()");
+        /* wait "on the gpu" (ie. this won't necessarily block, but
+         * will block the rendering until fence is signaled), until
+         * the previous pageflip completes so we don't render into
+         * the buffer that is still on screen.
+         */
+        p->egl.eglWaitSyncKHR(p->egl.display, p->kms_fence, 0);
+    }
+
     return ra_gl_ctx_start_frame(sw, out_fbo);
 }
 
@@ -466,13 +488,23 @@ static bool drm_atomic_egl_submit_frame(struct ra_swapchain *sw, const struct vo
     if (!p->kms->atomic_context)
         return false;
 
-    /* int64_t before = mp_time_us(); */
-    /* /\* eglWaitClient(); *\/ */
-    /* /\* p->gl.Finish(); *\/ */
-    /* /\* p->gl.Flush(); *\/ */
-    /* int64_t after = mp_time_us(); */
-    /* printf("diff: %"PRId64"\n", after - before); */
+    int64_t before = mp_time_us();
+    if (p->fence) {
+        EGLint status;
+        do {
+            puts("eglClientWaitSyncKHR(fence)");
+            status = p->egl.eglClientWaitSyncKHR(p->egl.display,
+                                                 p->fence,
+                                                 0,
+                                                 EGL_FOREVER_KHR);
+        } while (status != EGL_CONDITION_SATISFIED_KHR);
+        p->egl.eglDestroySyncKHR(p->egl.display, p->fence);
+        p->fence = NULL;
+    }
+    int64_t after = mp_time_us();
+    printf("diff: %"PRId64"\n", after - before);
 
+    puts("create gpu_fence");
     /* insert fence to be singled in cmdstream.. this fence will be
      * signaled when gpu rendering done
      */
@@ -480,6 +512,12 @@ static bool drm_atomic_egl_submit_frame(struct ra_swapchain *sw, const struct vo
     if (!p->gpu_fence) {
         MP_ERR(sw->ctx->vo, "Couldn't create GPU fence\n");
         return false;
+    }
+
+    puts("create fence fence");
+    p->fence = p->egl.eglCreateSyncKHR(p->egl.display, EGL_SYNC_FENCE_KHR, NULL);
+    if (!p->fence) {
+        MP_ERR(sw->ctx->vo, "Couldn't create fence\n");
     }
 
     return true;
@@ -526,10 +564,12 @@ static bool drm_atomic_commit(struct ra_ctx *ctx, uint32_t flags)
     drm_object_set_property(atomic_ctx->request, atomic_ctx->osd_plane, "CRTC_H",  p->kms->mode.mode.vdisplay);
 
     if (p->kms_in_fence_fd != -1) {
-        drm_object_set_property(atomic_ctx->request,
-                                atomic_ctx->crtc, "OUT_FENCE_PTR", VOID2U64(&p->kms_out_fence_fd));
-        drm_object_set_property(atomic_ctx->request,
-                                atomic_ctx->osd_plane, "IN_FENCE_FD", p->kms_in_fence_fd);
+        if (drm_object_set_property(atomic_ctx->request,
+                                    atomic_ctx->crtc, "OUT_FENCE_PTR", VOID2U64(&p->kms_out_fence_fd)) < 0)
+            MP_WARN(ctx->vo, "Could not set OUT_FENCE_PTR.\n");
+        if (drm_object_set_property(atomic_ctx->request,
+                                    atomic_ctx->osd_plane, "IN_FENCE_FD", p->kms_in_fence_fd) < 0)
+            MP_WARN(ctx->vo, "Could not set IN_FENCE_FD.\n");
     }
 
     int ret = drmModeAtomicCommit(p->kms->fd, atomic_ctx->request, flags, NULL);
@@ -614,11 +654,13 @@ static void drm_egl_swap_buffers(struct ra_swapchain *sw)
     struct ra_ctx *ctx = sw->ctx;
     struct priv *p = ctx->priv;
 
+    puts("eglSwapBuffers()");
     eglSwapBuffers(p->egl.display, p->egl.surface);
 
     /* after swapbuffers, gpu_fence should be flushed, so safe
      * to get fd:
      */
+    puts("eglDupNativeFencesFDANDROID()");
     p->kms_in_fence_fd = p->egl.eglDupNativeFenceFDANDROID(p->egl.display, p->gpu_fence);
     p->egl.eglDestroySyncKHR(p->egl.display, p->gpu_fence);
     p->gpu_fence = NULL;
@@ -639,6 +681,7 @@ static void drm_egl_swap_buffers(struct ra_swapchain *sw)
          * post a new one whilst the previous one is still pending.
          */
         do {
+            puts("eglClientWaitSyncKHR(kms_fence)");
             status = p->egl.eglClientWaitSyncKHR(p->egl.display,
                                                  p->kms_fence,
                                                  0,
@@ -663,30 +706,6 @@ static void drm_egl_swap_buffers(struct ra_swapchain *sw)
 
     /* Allow a modeset change for the first commit only. */
     p->atomic_commit_flags &= ~(DRM_MODE_ATOMIC_ALLOW_MODESET);
-
-    if (p->kms_out_fence_fd != -1) {
-        p->kms_fence = create_fence(&p->egl, p->kms_out_fence_fd);
-        if (!p->kms_fence) {
-            MP_ERR(sw->ctx->vo, "Couldn't create KMS fence\n");
-            // TODO: signal a fail condition somehow
-        }
-
-        /* driver now has ownership of the fence fd: */
-        p->kms_out_fence_fd = -1;
-
-        /* wait "on the gpu" (ie. this won't necessarily block, but
-         * will block the rendering until fence is signaled), until
-         * the previous pageflip completes so we don't render into
-         * the buffer that is still on screen.
-         */
-        p->egl.eglWaitSyncKHR(p->egl.display, p->kms_fence, 0);
-
-        /* int64_t before = mp_time_us(); */
-        eglWaitClient();
-        /* int64_t after = mp_time_us(); */
-        /* printf("diff: %"PRId64"\n", after - before); */
-    }
-
 }
 
 static const struct ra_swapchain_fns drm_atomic_swapchain = {
