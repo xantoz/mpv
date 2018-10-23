@@ -283,11 +283,11 @@ typedef enum mpv_render_param_type {
      */
     MPV_RENDER_PARAM_DRM_DISPLAY = 14,
     /**
-     * DRM osd size, contains osd dimensions.
+     * DRM draw surface size, contains draw surface dimensions.
      * Valid for mpv_render_context_create().
-     * Type : struct mpv_opengl_drm_osd_size*
+     * Type : struct mpv_opengl_drm_render_size*
      */
-    MPV_RENDER_PARAM_DRM_OSD_SIZE = 15,
+    MPV_RENDER_PARAM_DRM_DRAW_SURFACE_SIZE = 15,
 } mpv_render_param_type;
 
 /**
