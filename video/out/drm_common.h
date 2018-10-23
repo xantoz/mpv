@@ -49,10 +49,10 @@ struct drm_opts {
     char *drm_connector_spec;
     char *drm_mode_spec;
     int drm_atomic;
-    int drm_osd_plane;
-    int drm_video_plane;
+    int drm_render_plane;
+    int drm_drmprime_video_plane;
     int drm_format;
-    struct m_geometry drm_osd_size;
+    struct m_geometry drm_render_size;
 };
 
 bool vt_switcher_init(struct vt_switcher *s, struct mp_log *log);
@@ -66,7 +66,7 @@ void vt_switcher_release(struct vt_switcher *s, void (*handler)(void*),
                          void *user_data);
 
 struct kms *kms_create(struct mp_log *log, const char *connector_spec,
-                       const char *mode_spec, int osd_plane, int video_plane,
+                       const char *mode_spec, int render_plane, int drmprime_video_plane,
                        bool use_atomic);
 void kms_destroy(struct kms *kms);
 double kms_get_display_fps(const struct kms *kms);

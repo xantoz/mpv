@@ -507,21 +507,28 @@ Available video output drivers are:
 
         Note: Only affects ``gpu-context=drm``. ``vo=drm`` supports legacy modesetting only.
 
-    ``--drm-osd-plane=<primary|overlay|N>``
-        Select the DRM plane to use for OSD (or OSD and video). The plane can be
-        specified as ``primary``, which will pick the first applicable primary
-        plane; ``overlay``, which will pick the first applicable overlay plane;
-        or by index. The index is zero based, and related to the CRTC. When using
-        this option with the drm_prime renderer, it will only affect the OSD
-        contents. Otherwise it will set OSD & video plane.
+    ``--drm-render-plane=<primary|overlay|N>``
+        Select the DRM plane to which video and OSD is rendered to, under normal
+        circumstances. The plane can be specified as ``primary``, which will
+        pick the first applicable primary plane; ``overlay``, which will pick
+        the first applicable overlay plane; or by index. The index is zero
+        based, and related to the CRTC.
         (default: primary)
 
-    ``--drm-video-plane=<primary|overlay|N>``
-        Select the DRM plane index to use for video layer. This option accepts
-        the same values as ``--drm-osd-plane``. This option has an effect
-        only when using the drm_prime renderer (which supports several layers)
-        together with ``vo=gpu`` and ``gpu-context=drm``.
-        (default: overlay)
+        When using this option with the drmprime-drm hwdec interop, only the OSD
+        is rendered to this plane.
+
+    ``--drm-drmprime-video-plane=<primary|overlay|N>``
+        Select the DRM plane to use for video with the drmprime-drm hwdec
+        interop (used by e.g. the rkmpp hwdec on RockChip SoCs, and v4l2 hwdec:s
+        on various other SoC:s). The plane is unused otherwise. This option
+        accepts the same values as ``--drm-render-plane``. (default: overlay)
+
+        To be able to successfully play 4K video on various SoCs you might need
+        to set ``--drm-render-plane=overlay --drm-drmprime-video-plane-id=primary``
+        and setting ``--drm-render-size=1920x1080``, to render the OSD at a
+        lower resolution (the video when handled by the hwdec will be on the
+        drmprime-video plane and at full 4K resolution)
 
     ``--drm-format=<xrgb8888|xrgb2101010>``
         Select the DRM format to use (default: xrgb8888). This allows you to
@@ -536,11 +543,11 @@ Available video output drivers are:
         This currently only has an effect when used together with the ``drm``
         backend for the ``gpu`` VO. The ``drm`` VO always uses xrgb8888.
 
-    ``--drm-osd-size=<[WxH]>``
+    ``--drm-render-size=<[WxH]>``
         Sets the OSD OpenGL size to the specified size. OSD will then be upscaled
         to the current screen resolution. This option can be useful when using
         several layers in high resolutions with a GPU which cannot handle it.
-        Note : this option is only available with DRM atomic support.
+        Note: this option is only available with DRM atomic support.
         (default: display resolution)
 
 ``mediacodec_embed`` (Android)
