@@ -432,11 +432,8 @@ static void update_latency(struct priv *p)
     const uint64_t now_monotonic = ts.tv_sec * 1000000LL + ts.tv_nsec / 1000;
     const int64_t ust_mp_time = mp_time_us() - (now_monotonic - p->ust);
 
-    // Assumes we are being called every vsync. The fact that this context will
-    // only ever queue one swap before waiting for the next one, means that sbc
-    // can be implicitly known to always be one before, and we can use msc for
-    // skip detection.
-    p->last_queue_display_time = ust_mp_time + p->vsync_duration;
+    // Assumes we are being called every vsync.
+    p->last_queue_display_time = ust_mp_time + 2 * p->vsync_duration;
     p->last_skipped_vsyncs = msc_passed - 1;
 }
 
