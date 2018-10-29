@@ -76,6 +76,8 @@ struct priv {
     bool active;
     bool waiting_for_flip;
 
+    bool paused;
+
     bool vt_switcher_active;
     struct vt_switcher vt_switcher;
 
@@ -459,7 +461,8 @@ static void drm_egl_swap_buffers(struct ra_ctx *ctx)
     }
 
     if (p->gbm.bo[2]) {
-        gbm_surface_release_buffer(p->gbm.surface, p->gbm.bo[0]);
+        if (p->gbm.bo[0])
+            gbm_surface_release_buffer(p->gbm.surface, p->gbm.bo[0]);
         p->gbm.bo[0] = p->gbm.bo[1];
         p->gbm.bo[1] = p->gbm.bo[2];
         p->gbm.bo[2] = NULL;
@@ -468,11 +471,18 @@ static void drm_egl_swap_buffers(struct ra_ctx *ctx)
     eglSwapBuffers(p->egl.display, p->egl.surface);
 
     p->gbm.bo[2] = gbm_surface_lock_front_buffer(p->gbm.surface);
+    if (!p->gbm.bo[2])
+        MP_ERR(ctx->vo, "Couldn't lock front buffer\n");
 
-    if (!p->gbm.bo[1])
+    // When paused we need to do effectively double buffering to allow the
+    // updates to be immediate (swap_buffers is no longer called often enough),
+    // so queue the third buffer for a flip instead of the back buffer.
+    unsigned int flip_buf = p->paused ? 2 : 1;
+
+    if (!p->gbm.bo[flip_buf])
         return;
 
-    update_framebuffer_from_bo(ctx, p->gbm.bo[1]);
+    update_framebuffer_from_bo(ctx, p->gbm.bo[flip_buf]);
 
     p->waiting_for_flip = true;
     if (atomic_ctx) {
@@ -747,6 +757,7 @@ static bool drm_egl_reconfig(struct ra_ctx *ctx)
 static int drm_egl_control(struct ra_ctx *ctx, int *events, int request,
                            void *arg)
 {
+    struct vo *vo = ctx->vo;
     struct priv *p = ctx->priv;
     switch (request) {
     case VOCTRL_GET_DISPLAY_FPS: {
@@ -756,6 +767,13 @@ static int drm_egl_control(struct ra_ctx *ctx, int *events, int request,
         *(double*)arg = fps;
         return VO_TRUE;
     }
+    case VOCTRL_RESUME:
+        p->paused = false;
+        return VO_TRUE;
+    case VOCTRL_PAUSE:
+        vo->want_redraw = true;
+        p->paused = true;
+        return VO_TRUE;
     }
     return VO_NOTIMPL;
 }
