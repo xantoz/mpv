@@ -618,7 +618,7 @@ static bool drm_egl_init(struct ra_ctx *ctx)
     }
 
     if (!probe_gbm_format(ctx, argb_format, xrgb_format)) {
-        MP_ERR(ctx->vo, "No suitable format found on DRM primary plane (tried: %s and %s).\n",
+        MP_ERR(ctx->vo, "No suitable format found on draw plane (tried: %s and %s).\n",
                gbm_format_to_string(argb_format), gbm_format_to_string(xrgb_format));
         return false;
     }
