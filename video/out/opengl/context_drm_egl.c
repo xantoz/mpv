@@ -467,22 +467,6 @@ static void swapchain_step(struct ra_ctx *ctx)
     MP_TARRAY_REMOVE_AT(p->gbm.bo, p->gbm.num_bos, 0);
 }
 
-static void drain_swapchain(struct ra_ctx *ctx)
-{
-    struct priv *p = ctx->priv;
-
-    while (p->gbm.num_bos > 1) {
-        if (!p->gbm.bo[1]) {
-            MP_ERR(ctx->vo, "Hole in swapchain?\n");
-            continue;
-        }
-        update_framebuffer_from_bo(ctx, p->gbm.bo[1]);
-        queue_flip(ctx);
-        wait_on_flip(ctx);
-        swapchain_step(ctx);
-    }
-}
-
 static void new_fence(struct ra_ctx *ctx)
 {
     struct priv *p = ctx->priv;
@@ -498,9 +482,7 @@ static void wait_fence(struct ra_ctx *ctx)
 {
     struct priv *p = ctx->priv;
 
-    const unsigned int depth = MPMIN(ctx->opts.swapchain_depth, MPMAX(p->gbm.num_bos, 1));
-
-    while (p->num_vsync_fences >= depth) {
+    while (p->num_vsync_fences && (p->num_vsync_fences >= p->gbm.num_bos)) {
         p->gl.ClientWaitSync(p->vsync_fences[0], GL_SYNC_FLUSH_COMMANDS_BIT, 1e9);
         p->gl.DeleteSync(p->vsync_fences[0]);
         MP_TARRAY_REMOVE_AT(p->vsync_fences, p->num_vsync_fences, 0);
@@ -534,7 +516,7 @@ static void drm_egl_swap_buffers(struct ra_swapchain *sw)
 {
     struct ra_ctx *ctx = sw->ctx;
     struct priv *p = ctx->priv;
-    const bool drain = p->paused || p->still;  // We need to drain the swapchain
+    const bool drain = p->paused || p->still;  // True when we need to drain the swapchain
 
     if (!p->active)
         return;
@@ -543,48 +525,26 @@ static void drm_egl_swap_buffers(struct ra_swapchain *sw)
 
     eglSwapBuffers(p->egl.display, p->egl.surface);
 
-    // Deferred wait for flip (when swapchain_depth + 1 < max # gbm_bo:s)
-    if (p->waiting_for_flip) {
-        wait_on_flip(ctx);
-        swapchain_step(ctx);
-    }
-
     struct gbm_bo *new_bo = gbm_surface_lock_front_buffer(p->gbm.surface);
     if (!new_bo) {
         MP_ERR(ctx->vo, "Couldn't lock front buffer\n");
         return;
     }
     MP_TARRAY_APPEND(p, p->gbm.bo, p->gbm.num_bos, new_bo);
-
     new_fence(ctx);
 
-    const bool have_free_buffers = gbm_surface_has_free_buffers(p->gbm.surface);
-
-    // Return early if there is more space available in the swapchain
-    if (!drain &&
-        p->gbm.num_bos <= ctx->opts.swapchain_depth &&
-        have_free_buffers) {
-        return;
-    }
-
-    if (p->gbm.num_bos < 2 || !p->gbm.bo[1]) {
-        MP_ERR(ctx->vo, "Hole in swapchain?\n");
-        return;
-    }
-    update_framebuffer_from_bo(ctx, p->gbm.bo[1]);
-    queue_flip(ctx);
-
-    // We need to immediately wait for the flip if we're out of free buffers.
-    // Also wait directly when we need to drain the swapchain.
-    if (!have_free_buffers || drain) {
-        wait_on_flip(ctx);
-        swapchain_step(ctx);
-    }
-
-    // We need to drain the swapchain when paused/showing still images so that
-    // output does not lag behind user input.
-    if (drain) {
-        drain_swapchain(ctx);
+    while (((p->gbm.num_bos - 1) > ctx->opts.swapchain_depth || !gbm_surface_has_free_buffers(p->gbm.surface)) ||
+           (drain && p->gbm.num_bos > 2)) {
+        if (p->waiting_for_flip) {
+            wait_on_flip(ctx);
+            swapchain_step(ctx);
+        }
+        if (!p->gbm.bo[1]) {
+            MP_ERR(ctx->vo, "Hole in swapchain?\n");
+            continue;
+        }
+        update_framebuffer_from_bo(ctx, p->gbm.bo[1]);
+        queue_flip(ctx);
     }
 }
 
