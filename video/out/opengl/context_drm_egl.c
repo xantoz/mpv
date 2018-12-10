@@ -62,7 +62,7 @@ struct gbm
 {
     struct gbm_surface *surface;
     struct gbm_device *device;
-    struct gbm_frame *bo_queue;
+    struct gbm_frame **bo_queue;
     unsigned int num_bos;
 };
 
@@ -495,21 +495,23 @@ static void enqueue_bo(struct ra_ctx *ctx, struct gbm_bo *bo)
     struct priv *p = ctx->priv;
 
     ++p->sbc;
-    MP_TARRAY_APPEND(p, p->gbm.bo_queue, p->gbm.num_bos,
-                     (struct gbm_frame) {
-                         .bo = bo,
-                         .vsync = {
-                             .ust = p->vsync.ust,
-                             .msc = p->vsync.msc,
-                             .sbc = p->sbc,
-                         },
-                     });
+    struct gbm_frame *new_frame =
+        talloc_struct(p, struct gbm_frame, {
+                .bo = bo,
+                .vsync = {
+                    .ust = p->vsync.ust,
+                    .msc = p->vsync.msc,
+                    .sbc = p->sbc,
+                },
+            });
+    MP_TARRAY_APPEND(p, p->gbm.bo_queue, p->gbm.num_bos, new_frame);
 }
 
 static void dequeue_bo(struct ra_ctx *ctx)
 {
     struct priv *p = ctx->priv;
 
+    talloc_free(p->gbm.bo_queue[0]);
     MP_TARRAY_REMOVE_AT(p->gbm.bo_queue, p->gbm.num_bos, 0);
 }
 
@@ -520,8 +522,8 @@ static void swapchain_step(struct ra_ctx *ctx)
     if (!(p->gbm.num_bos > 0))
         return;
 
-    if (p->gbm.bo_queue[0].bo)
-        gbm_surface_release_buffer(p->gbm.surface, p->gbm.bo_queue[0].bo);
+    if (p->gbm.bo_queue[0]->bo)
+        gbm_surface_release_buffer(p->gbm.surface, p->gbm.bo_queue[0]->bo);
     dequeue_bo(ctx);
 }
 
@@ -598,12 +600,12 @@ static void drm_egl_swap_buffers(struct ra_swapchain *sw)
         }
         if (p->gbm.num_bos <= 1)
             break;
-        if (!p->gbm.bo_queue[1].bo) {
+        if (!p->gbm.bo_queue[1] || !p->gbm.bo_queue[1]->bo) {
             MP_ERR(ctx->vo, "Hole in swapchain?\n");
             swapchain_step(ctx);
             continue;
         }
-        queue_flip(ctx, &p->gbm.bo_queue[1]);
+        queue_flip(ctx, p->gbm.bo_queue[1]);
     }
 }
 
