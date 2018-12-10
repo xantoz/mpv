@@ -716,7 +716,9 @@ static void page_flipped(int fd, unsigned int msc, unsigned int sec,
     const unsigned int msc_since_last_flip = p->vsync.msc - p->prev_vsync.msc;
     const unsigned int sbc_since_last_flip = p->vsync.sbc - p->prev_vsync.sbc;
 
-    const bool first_time = (p->prev_vsync.ust == 0) || (p->prev_vsync.msc == 0) || (p->prev_vsync.sbc == 0);
+    const bool ready =
+        (p->prev_vsync.ust != 0) && (p->prev_vsync.msc != 0) &&
+        (frame->vsync.ust != 0) && (frame->vsync.msc != 0);
 
     p->prev_vsync = p->vsync;
 
@@ -724,7 +726,7 @@ static void page_flipped(int fd, unsigned int msc, unsigned int sec,
     p->vsync.msc = msc;
     p->vsync.sbc = frame->vsync.sbc;
 
-    if (!first_time) {
+    if (ready) {
         // Convert to mp_time
         struct timespec ts;
         if (clock_gettime(CLOCK_MONOTONIC, &ts))
