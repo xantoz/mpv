@@ -898,7 +898,7 @@ static bool drm_egl_init(struct ra_ctx *ctx)
     ra_add_native_resource(ctx->ra, "drm_params", &p->drm_params);
     ra_add_native_resource(ctx->ra, "drm_draw_surface_size", &p->draw_surface_size);
 
-    p->vsync_info.vsync_duration = -1;
+    p->vsync_info.vsync_duration = 0;
     p->vsync_info.skipped_vsyncs = -1;
     p->vsync_info.last_queue_display_time = -1;
 
