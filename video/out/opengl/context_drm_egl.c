@@ -746,12 +746,16 @@ static void page_flipped(int fd, unsigned int msc, unsigned int sec,
         // p->vsync_info.last_queue_display_time = ust_mp_time + ust_since_enqueue; // Works because both mp_time and  UST are expressed in microseconds
 
         /*
-        printf("{ ust_since_last_flip: %"PRIu64", msc_since_last_flip: %u, sbc_since_last_flip: %u\n"
-               "  ust_since_enqueue: %"PRIu64", msc_since_enqueue: %u, sbc_since_enqueue %u,\n"
+        printf("{ ust_since_last_flip: %"PRIu64", msc_since_last_flip: %u, sbc_since_last_flip: %u,\n"
+               "  ust_since_enqueue:   %"PRIu64", msc_since_enqueue:   %u, sbc_since_enqueue:   %u,\n"
                "  vsync_duration: %"PRId64", skipped_vsyncs: %"PRId64", last_queue_display_time: %"PRId64" }\n",
                ust_since_last_flip, msc_since_last_flip, sbc_since_last_flip,
                ust_since_enqueue, msc_since_enqueue, sbc_since_enqueue,
                p->vsync_info.vsync_duration, p->vsync_info.skipped_vsyncs, p->vsync_info.last_queue_display_time);
+        */
+
+        /*
+        printf("sbc %u displayed at %lu ... new sbc %u will probably be displayed at %lu\n", frame->vsync.sbc, ust_mp_time, p->sbc, p->vsync_info.last_queue_display_time);
         */
     }
 
