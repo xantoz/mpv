@@ -98,8 +98,8 @@ struct priv {
     bool still;
     bool paused;
 
-    struct vsync_tuple vsync;  // Contains the SBC of what is currently on screen
-    struct vsync_tuple prev_vsync; // vsync tuple of previous page flip
+    unsigned int prev_sbc;
+    struct vsync_tuple vsync;
     struct vo_vsync_info vsync_info;
 
     struct mpv_opengl_drm_params drm_params;
@@ -493,7 +493,7 @@ static void enqueue_bo(struct ra_ctx *ctx, struct gbm_bo *bo)
 {
     struct priv *p = ctx->priv;
 
-    p->prev_vsync.sbc = p->vsync.sbc++;
+    p->prev_sbc = p->vsync.sbc++;
     struct gbm_frame *new_frame= talloc(p, struct gbm_frame);
     new_frame->bo = bo;
     new_frame->vsync = p->vsync;
@@ -705,18 +705,17 @@ static void page_flipped(int fd, unsigned int msc, unsigned int sec,
     // frame->vsync.sbc is the sequence number for the frame that was just flipped to screen
     struct gbm_frame *frame = closure->frame;
 
-    const uint64_t     ust_since_last_flip = p->vsync.ust - p->prev_vsync.ust;
-    const unsigned int msc_since_last_flip = p->vsync.msc - p->prev_vsync.msc;
-    const unsigned int sbc_since_last_flip = p->vsync.sbc - p->prev_vsync.sbc;
-
     const bool ready =
-        (p->prev_vsync.ust != 0) && (p->prev_vsync.msc != 0) &&
+        (p->vsync.ust != 0) && (p->vsync.msc != 0) &&
         (frame->vsync.ust != 0) && (frame->vsync.msc != 0);
 
-    p->prev_vsync.ust = p->vsync.ust;
-    p->prev_vsync.msc = p->vsync.msc;
+    const uint64_t ust = (sec * 1000000LL) + usec;
 
-    p->vsync.ust = (sec * 1000000LL) + usec;
+    const uint64_t     ust_since_last_flip = ust - p->vsync.ust;
+    const unsigned int msc_since_last_flip = msc - p->vsync.msc;
+    const unsigned int sbc_since_last_flip = p->vsync.sbc - p->prev_sbc;
+
+    p->vsync.ust = ust;
     p->vsync.msc = msc;
 
     if (ready) {
