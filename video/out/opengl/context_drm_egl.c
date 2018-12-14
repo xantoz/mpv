@@ -494,15 +494,9 @@ static void enqueue_bo(struct ra_ctx *ctx, struct gbm_bo *bo)
     struct priv *p = ctx->priv;
 
     p->prev_vsync.sbc = p->vsync.sbc++;
-    struct gbm_frame *new_frame =
-        talloc_struct(p, struct gbm_frame, {
-                .bo = bo,
-                .vsync = {
-                    .ust = p->vsync.ust,
-                    .msc = p->vsync.msc,
-                    .sbc = p->vsync.sbc,
-                },
-            });
+    struct gbm_frame *new_frame= talloc(p, struct gbm_frame);
+    new_frame->bo = bo;
+    new_frame->vsync = p->vsync;
     MP_TARRAY_APPEND(p, p->gbm.bo_queue, p->gbm.num_bos, new_frame);
 }
 
