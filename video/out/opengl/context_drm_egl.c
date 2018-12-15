@@ -924,6 +924,10 @@ static int drm_egl_control(struct ra_ctx *ctx, int *events, int request,
         return VO_TRUE;
     case VOCTRL_RESUME:
         p->paused = false;
+        p->vsync_info.last_queue_display_time = -1;
+        p->vsync_info.skipped_vsyncs = 0;
+        p->vsync.ust = 0;
+        p->vsync.msc = 0;
         return VO_TRUE;
     }
     return VO_NOTIMPL;
