@@ -494,6 +494,7 @@ static void enqueue_bo(struct ra_ctx *ctx, struct gbm_bo *bo)
     struct priv *p = ctx->priv;
 
     p->prev_sbc = p->vsync.sbc++;
+    /* printf("enqueue %u\n", p->vsync.sbc); */
     struct gbm_frame *new_frame= talloc(p, struct gbm_frame);
     new_frame->bo = bo;
     new_frame->vsync = p->vsync;
@@ -697,6 +698,8 @@ static bool probe_gbm_format(struct ra_ctx *ctx, uint32_t argb_format, uint32_t 
 static void page_flipped(int fd, unsigned int msc, unsigned int sec,
                          unsigned int usec, void *data)
 {
+    /* puts("page_flipped()"); */
+
     struct pflip_cb_closure *closure = data;
     struct priv *p = closure->priv;
 
@@ -921,6 +924,7 @@ static int drm_egl_control(struct ra_ctx *ctx, int *events, int request,
     case VOCTRL_PAUSE:
         ctx->vo->want_redraw = true;
         p->paused = true;
+        /* puts("PAUSE"); */
         return VO_TRUE;
     case VOCTRL_RESUME:
         p->paused = false;
@@ -928,6 +932,7 @@ static int drm_egl_control(struct ra_ctx *ctx, int *events, int request,
         p->vsync_info.skipped_vsyncs = 0;
         p->vsync.ust = 0;
         p->vsync.msc = 0;
+        /* puts("RESUME"); */
         return VO_TRUE;
     }
     return VO_NOTIMPL;
