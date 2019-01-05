@@ -318,7 +318,7 @@ local function add_single_video(json)
                 streams[#streams + 1] = edl_track or track.url
             elseif track.vcodec == "none" then
                 -- according to ytdl, if vcodec is None, it's audio
-                streams[#streams + 1] = track.url
+                streams[#streams + 1] = edl_track or track.url
             end
         end
 
