@@ -98,7 +98,6 @@ struct priv {
     bool still;
     bool paused;
 
-    unsigned int prev_sbc;
     struct vsync_tuple vsync;
     struct vo_vsync_info vsync_info;
 
@@ -493,9 +492,8 @@ static void enqueue_bo(struct ra_ctx *ctx, struct gbm_bo *bo)
 {
     struct priv *p = ctx->priv;
 
-    p->prev_sbc = p->vsync.sbc++;
-    /* printf("enqueue %u\n", p->vsync.sbc); */
-    struct gbm_frame *new_frame= talloc(p, struct gbm_frame);
+    p->vsync.sbc++;
+    struct gbm_frame *new_frame = talloc(p, struct gbm_frame);
     new_frame->bo = bo;
     new_frame->vsync = p->vsync;
     MP_TARRAY_APPEND(p, p->gbm.bo_queue, p->gbm.num_bos, new_frame);
@@ -698,8 +696,6 @@ static bool probe_gbm_format(struct ra_ctx *ctx, uint32_t argb_format, uint32_t 
 static void page_flipped(int fd, unsigned int msc, unsigned int sec,
                          unsigned int usec, void *data)
 {
-    /* puts("page_flipped()"); */
-
     struct pflip_cb_closure *closure = data;
     struct priv *p = closure->priv;
 
@@ -714,9 +710,7 @@ static void page_flipped(int fd, unsigned int msc, unsigned int sec,
 
     const uint64_t ust = (sec * 1000000LL) + usec;
 
-    const uint64_t     ust_since_last_flip = ust - p->vsync.ust;
     const unsigned int msc_since_last_flip = msc - p->vsync.msc;
-    const unsigned int sbc_since_last_flip = p->vsync.sbc - p->prev_sbc;
 
     p->vsync.ust = ust;
     p->vsync.msc = msc;
@@ -733,25 +727,9 @@ static void page_flipped(int fd, unsigned int msc, unsigned int sec,
         const unsigned int msc_since_enqueue = p->vsync.msc - frame->vsync.msc;
         const unsigned int sbc_since_enqueue = p->vsync.sbc - frame->vsync.sbc;
 
-        // p->vsync_info.vsync_duration = ust_since_last_flip / msc_since_last_flip;
         p->vsync_info.vsync_duration = ust_since_enqueue / msc_since_enqueue;
         p->vsync_info.skipped_vsyncs = msc_since_last_flip - 1; // Valid iff swap_buffers is called every vsync
         p->vsync_info.last_queue_display_time = ust_mp_time + (sbc_since_enqueue * p->vsync_info.vsync_duration);
-
-        // p->vsync_info.last_queue_display_time = ust_mp_time + ust_since_enqueue; // Works because both mp_time and  UST are expressed in microseconds
-
-        /*
-        printf("{ ust_since_last_flip: %"PRIu64", msc_since_last_flip: %u, sbc_since_last_flip: %u,\n"
-               "  ust_since_enqueue:   %"PRIu64", msc_since_enqueue:   %u, sbc_since_enqueue:   %u,\n"
-               "  vsync_duration: %"PRId64", skipped_vsyncs: %"PRId64", last_queue_display_time: %"PRId64" }\n",
-               ust_since_last_flip, msc_since_last_flip, sbc_since_last_flip,
-               ust_since_enqueue, msc_since_enqueue, sbc_since_enqueue,
-               p->vsync_info.vsync_duration, p->vsync_info.skipped_vsyncs, p->vsync_info.last_queue_display_time);
-        */
-
-        /*
-        printf("sbc %u displayed at %lu ... new sbc %u will probably be displayed at %lu\n", frame->vsync.sbc, ust_mp_time, p->vsync.sbc, p->vsync_info.last_queue_display_time);
-        */
     }
 
 fail:
@@ -924,7 +902,6 @@ static int drm_egl_control(struct ra_ctx *ctx, int *events, int request,
     case VOCTRL_PAUSE:
         ctx->vo->want_redraw = true;
         p->paused = true;
-        /* puts("PAUSE"); */
         return VO_TRUE;
     case VOCTRL_RESUME:
         p->paused = false;
@@ -932,7 +909,6 @@ static int drm_egl_control(struct ra_ctx *ctx, int *events, int request,
         p->vsync_info.skipped_vsyncs = 0;
         p->vsync.ust = 0;
         p->vsync.msc = 0;
-        /* puts("RESUME"); */
         return VO_TRUE;
     }
     return VO_NOTIMPL;
