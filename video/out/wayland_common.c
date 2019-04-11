@@ -803,7 +803,7 @@ static void pts_presented(void *data, struct wp_presentation_feedback *pts_feedb
 }
 
 static void pts_discarded(void *data,
-		   struct wp_presentation_feedback *presentation_feedback)
+                          struct wp_presentation_feedback *presentation_feedback)
 {
     struct vo_wayland_state *wl = data;
 
@@ -832,7 +832,7 @@ static void frame_callback(void *data, struct wl_callback *callback, uint32_t ti
     wl_callback_add_listener(wl->frame_callback, &frame_listener, wl);
 
     wl->pts_feedback = wp_presentation_feedback(wl->pts_interface, wl->surface);
-	wp_presentation_feedback_add_listener(wl->pts_feedback, &pts_feedback_listener, wl);
+    wp_presentation_feedback_add_listener(wl->pts_feedback, &pts_feedback_listener, wl);
 
     if (!vo_render_frame_external(wl->vo))
         wl_surface_commit(wl->surface);
