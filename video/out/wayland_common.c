@@ -18,6 +18,7 @@
 #include <poll.h>
 #include <unistd.h>
 #include <linux/input.h>
+#include <time.h>
 #include "common/msg.h"
 #include "input/input.h"
 #include "input/keycodes.h"
@@ -787,8 +788,21 @@ static void pts_presented(void *data, struct wp_presentation_feedback *pts_feedb
         .last_queue_display_time = -1,
         .skipped_vsyncs = -1,
     };
-    // Just use the current system timestamp (TODO: use refresh_nsec etc. for better values)
-    vsync.last_queue_display_time = mp_time_us();
+    // Just use the current system timestamp
+    /* vsync.last_queue_display_time = mp_time_us(); */
+
+    /* vsync.last_queue_display_time = mp_time_us() + (refresh_nsec / 1000); */
+    /* vsync.last_queue_display_time = mp_time_us() + (refresh_nsec / 1000) *2; */
+
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts))
+        puts("ouch");
+    const uint64_t now_monotonic = ts.tv_sec * 1000000LL + ts.tv_nsec / 1000;
+    const uint64_t ust = (((uint64_t)sec_hi << 32) | ((uint64_t)sec_lo))*1000000LL + nsec/1000;
+    const uint64_t ust_mp_time = mp_time_us() - (now_monotonic - ust);
+    /* vsync.last_queue_display_time = ust_mp_time; */
+    /* vsync.last_queue_display_time = ust_mp_time + (1*refresh_nsec/1000); */
+    vsync.last_queue_display_time = ust_mp_time + (2*refresh_nsec/1000);
 
     update_vsync_timing_after_swap_external(wl->vo, &vsync);
 
