@@ -532,6 +532,10 @@ struct vo_frame *vo_get_current_vo_frame(struct vo *vo);
 struct mp_image *vo_get_image(struct vo *vo, int imgfmt, int w, int h,
                               int stride_align);
 
+
+void update_vsync_timing_after_swap_external(struct vo *vo, struct vo_vsync_info *vsync);
+
+
 void vo_wakeup(struct vo *vo);
 void vo_wait_default(struct vo *vo, int64_t until_time);
 

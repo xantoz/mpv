@@ -96,6 +96,11 @@ struct vo_wayland_state {
     int dnd_mime_score;
     int dnd_fd;
 
+    /* PTS */
+    struct wp_presentation *pts_interface;
+    uint32_t pts_clk_id;
+    struct wp_presentation_feedback *pts_feedback;
+
     /* Cursor */
     struct wl_cursor_theme *cursor_theme;
     struct wl_cursor       *default_cursor;

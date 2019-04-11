@@ -474,8 +474,7 @@ static void vsync_skip_detection(struct vo *vo)
 }
 
 // Always called locked.
-static void update_vsync_timing_after_swap(struct vo *vo,
-                                           struct vo_vsync_info *vsync)
+void update_vsync_timing_after_swap_external(struct vo *vo, struct vo_vsync_info *vsync)
 {
     struct vo_internal *in = vo->in;
 
@@ -927,7 +926,8 @@ bool vo_render_frame_external(struct vo *vo)
         in->dropped_frame = prev_drop_count < vo->in->drop_count;
         in->rendering = false;
 
-        update_vsync_timing_after_swap(vo, &vsync);
+        if (!in->external_renderloop_drive)
+            update_vsync_timing_after_swap_external(vo, &vsync);
     }
 
     if (vo->driver->caps & VO_CAP_NORETAIN) {

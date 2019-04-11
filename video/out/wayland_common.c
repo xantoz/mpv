@@ -35,6 +35,9 @@
 // Generated from xdg-decoration-unstable-v1.xml
 #include "video/out/wayland/xdg-decoration-v1.h"
 
+// Generated from presentation-time.xml
+#include "video/out/wayland/pts.h"
+
 static void xdg_wm_base_ping(void *data, struct xdg_wm_base *wm_base, uint32_t serial)
 {
     xdg_wm_base_pong(wm_base, serial);
@@ -756,6 +759,66 @@ static const struct wl_surface_listener surface_listener = {
     surface_handle_leave,
 };
 
+static void get_pts_clk_id(void *data, struct wp_presentation *presentation,
+                           uint32_t clk_id)
+{
+    struct vo_wayland_state *wl = data;
+
+    wl->pts_clk_id = clk_id;
+}
+
+static const struct wp_presentation_listener pts_listener = {
+    get_pts_clk_id,
+};
+
+static void pts_sync_output(void *data, struct wp_presentation_feedback *pts_feedback,
+                            struct wl_output *output)
+{
+}
+
+static void pts_presented(void *data, struct wp_presentation_feedback *pts_feedback,
+                          uint32_t sec_hi, uint32_t sec_lo, uint32_t nsec,
+                          uint32_t refresh_nsec, uint32_t seq_hi, uint32_t seq_lo,
+                          uint32_t flags)
+{
+    struct vo_wayland_state *wl = data;
+
+    struct vo_vsync_info vsync = {
+        .last_queue_display_time = -1,
+        .skipped_vsyncs = -1,
+    };
+    // Just use the current system timestamp (TODO: use refresh_nsec etc. for better values)
+    vsync.last_queue_display_time = mp_time_us();
+
+    update_vsync_timing_after_swap_external(wl->vo, &vsync);
+
+    MP_INFO(wl, "Presented! Next in: %u, Flags: %s %s %s %s\n", refresh_nsec,
+            flags & WP_PRESENTATION_FEEDBACK_KIND_VSYNC ? "vsync" : "",
+            flags & WP_PRESENTATION_FEEDBACK_KIND_HW_CLOCK ? "hwclock" : "",
+            flags & WP_PRESENTATION_FEEDBACK_KIND_HW_COMPLETION ? "hwcompletion" : "",
+            flags & WP_PRESENTATION_FEEDBACK_KIND_ZERO_COPY ? "zerocopy" : "");
+
+    wp_presentation_feedback_destroy(wl->pts_feedback);
+    wl->pts_feedback = NULL;
+}
+
+static void pts_discarded(void *data,
+		   struct wp_presentation_feedback *presentation_feedback)
+{
+    struct vo_wayland_state *wl = data;
+
+    MP_INFO(wl, "Discarded!\n");
+
+    wp_presentation_feedback_destroy(wl->pts_feedback);
+    wl->pts_feedback = NULL;
+}
+
+static const struct wp_presentation_feedback_listener pts_feedback_listener = {
+    pts_sync_output,
+    pts_presented,
+    pts_discarded,
+};
+
 static const struct wl_callback_listener frame_listener;
 
 static void frame_callback(void *data, struct wl_callback *callback, uint32_t time)
@@ -767,6 +830,9 @@ static void frame_callback(void *data, struct wl_callback *callback, uint32_t ti
 
     wl->frame_callback = wl_surface_frame(wl->surface);
     wl_callback_add_listener(wl->frame_callback, &frame_listener, wl);
+
+    wl->pts_feedback = wp_presentation_feedback(wl->pts_interface, wl->surface);
+	wp_presentation_feedback_add_listener(wl->pts_feedback, &pts_feedback_listener, wl);
 
     if (!vo_render_frame_external(wl->vo))
         wl_surface_commit(wl->surface);
@@ -829,6 +895,11 @@ static void registry_handle_add(void *data, struct wl_registry *reg, uint32_t id
 
     if (!strcmp(interface, zwp_idle_inhibit_manager_v1_interface.name) && found++) {
         wl->idle_inhibit_manager = wl_registry_bind(reg, id, &zwp_idle_inhibit_manager_v1_interface, 1);
+    }
+
+    if (!strcmp(interface, wp_presentation_interface.name) && found++) {
+        wl->pts_interface = wl_registry_bind(reg, id, &wp_presentation_interface, 1);
+        wp_presentation_add_listener(wl->pts_interface, &pts_listener, wl);
     }
 
     if (found > 1)
@@ -1077,6 +1148,12 @@ void vo_wayland_uninit(struct vo *vo)
 
     if (wl->idle_inhibit_manager)
         zwp_idle_inhibit_manager_v1_destroy(wl->idle_inhibit_manager);
+
+    if (wl->pts_feedback)
+        wp_presentation_feedback_destroy(wl->pts_feedback);
+
+    if (wl->pts_interface)
+        wp_presentation_destroy(wl->pts_interface);
 
     if (wl->wm_base)
         xdg_wm_base_destroy(wl->wm_base);
