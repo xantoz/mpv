@@ -21,6 +21,7 @@
 #include <stdbool.h>
 #include <sys/mman.h>
 #include <poll.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <libswscale/swscale.h>
@@ -45,10 +46,9 @@
 #define BYTES_PER_PIXEL 4
 #define BITS_PER_PIXEL 32
 #define USE_MASTER 1
-#define BUF_COUNT 2
 
-// Modulo that works correctly for negative numbers
-#define MOD(a,b) ((((a)%(b))+(b))%(b))
+#define BUF_COUNT 4
+#define SWAPCHAIN_DEPTH 3
 
 struct framebuffer {
     uint32_t width;
@@ -58,6 +58,16 @@ struct framebuffer {
     uint32_t handle;
     uint8_t *map;
     uint32_t fb;
+};
+
+struct kms_frame {
+    struct framebuffer *fb;
+    struct drm_vsync_tuple vsync;
+};
+
+struct pflip_cb_closure {
+    struct priv *priv;
+    struct kms_frame *frame;
 };
 
 struct priv {
@@ -74,7 +84,13 @@ struct priv {
     struct framebuffer bufs[BUF_COUNT];
     int front_buf;
     bool active;
-    bool pflip_happening;
+    bool waiting_for_flip;
+    bool still;
+    bool paused;
+
+    struct kms_frame **fb_queue;
+    unsigned int fb_queue_len;
+    struct framebuffer *cur_fb;
 
     uint32_t depth;
     enum mp_imgfmt imgfmt;
@@ -88,6 +104,9 @@ struct priv {
     struct mp_rect dst;
     struct mp_osd_res osd;
     struct mp_sws_context *sws;
+
+    struct drm_vsync_tuple vsync;
+    struct vo_vsync_info vsync_info;
 };
 
 static void fb_destroy(int fd, struct framebuffer *buf)
@@ -158,7 +177,7 @@ err:
     return false;
 }
 
-static bool fb_setup_double_buffering(struct vo *vo)
+static bool fb_setup_buffers(struct vo *vo)
 {
     struct priv *p = vo->priv;
 
@@ -178,14 +197,59 @@ static bool fb_setup_double_buffering(struct vo *vo)
         }
     }
 
+    p->cur_fb = &p->bufs[0];
+
     return true;
 }
 
-static void page_flipped(int fd, unsigned int frame, unsigned int sec,
+static void page_flipped(int fd, unsigned int msc, unsigned int sec,
                          unsigned int usec, void *data)
 {
-    struct priv *p = data;
-    p->pflip_happening = false;
+    struct pflip_cb_closure *closure = data;
+    struct priv *p = closure->priv;
+
+    // frame->vsync.ust is the timestamp of the pageflip that happened just before this flip was queued
+    // frame->vsync.msc is the sequence number of the pageflip that happened just before this flip was queued
+    // frame->vsync.sbc is the sequence number for the frame that was just flipped to screen
+    struct kms_frame *frame = closure->frame;
+
+    const bool ready =
+        (p->vsync.msc != 0) &&
+        (frame->vsync.ust != 0) && (frame->vsync.msc != 0);
+
+    const uint64_t ust = (sec * 1000000LL) + usec;
+
+    const unsigned int msc_since_last_flip = msc - p->vsync.msc;
+
+    p->vsync.ust = ust;
+    p->vsync.msc = msc;
+
+    if (ready) {
+        // Convert to mp_time
+        struct timespec ts;
+        if (clock_gettime(CLOCK_MONOTONIC, &ts))
+            goto fail;
+        const uint64_t now_monotonic = ts.tv_sec * 1000000LL + ts.tv_nsec / 1000;
+        const uint64_t ust_mp_time = mp_time_us() - (now_monotonic - p->vsync.ust);
+
+        const uint64_t     ust_since_enqueue = p->vsync.ust - frame->vsync.ust;
+        const unsigned int msc_since_enqueue = p->vsync.msc - frame->vsync.msc;
+        const unsigned int sbc_since_enqueue = p->vsync.sbc - frame->vsync.sbc;
+
+        p->vsync_info.vsync_duration = ust_since_enqueue / msc_since_enqueue;
+        p->vsync_info.skipped_vsyncs = msc_since_last_flip - 1; // Valid iff swap_buffers is called every vsync
+        p->vsync_info.last_queue_display_time = ust_mp_time + (sbc_since_enqueue * p->vsync_info.vsync_duration);
+    }
+
+fail:
+    p->waiting_for_flip = false;
+    talloc_free(closure);
+}
+
+static void get_vsync(struct vo *vo, struct vo_vsync_info *info)
+{
+    struct priv *p = vo->priv;
+    *info = p->vsync_info;
 }
 
 static bool crtc_setup(struct vo *vo)
@@ -195,7 +259,7 @@ static bool crtc_setup(struct vo *vo)
         return true;
     p->old_crtc = drmModeGetCrtc(p->kms->fd, p->kms->crtc_id);
     int ret = drmModeSetCrtc(p->kms->fd, p->kms->crtc_id,
-                             p->bufs[MOD(p->front_buf - 1, BUF_COUNT)].fb,
+                             p->cur_fb->fb,
                              0, 0, &p->kms->connector->connector_id, 1,
                              &p->kms->mode.mode);
     p->active = true;
@@ -211,7 +275,7 @@ static void crtc_release(struct vo *vo)
     p->active = false;
 
     // wait for current page flip
-    while (p->pflip_happening) {
+    while (p->waiting_for_flip) {
         int ret = drmHandleEvent(p->kms->fd, &p->ev);
         if (ret) {
             MP_ERR(vo, "drmHandleEvent failed: %i\n", ret);
@@ -319,13 +383,41 @@ static int reconfig(struct vo *vo, struct mp_image_params *params)
     if (mp_sws_reinit(p->sws) < 0)
         return -1;
 
+    p->vsync_info.vsync_duration = 0;
+    p->vsync_info.skipped_vsyncs = -1;
+    p->vsync_info.last_queue_display_time = -1;
+
     vo->want_redraw = true;
     return 0;
+}
+
+static void wait_on_flip(struct vo *vo)
+{
+    struct priv *p = vo->priv;
+
+    if (p->waiting_for_flip) {
+        // poll page flip finish event
+        const int timeout_ms = 3000;
+        struct pollfd fds[1] = {
+            { .events = POLLIN, .fd = p->kms->fd },
+        };
+        poll(fds, 1, timeout_ms);
+        if (fds[0].revents & POLLIN) {
+            const int ret = drmHandleEvent(p->kms->fd, &p->ev);
+            if (ret != 0) {
+                MP_ERR(vo, "drmHandleEvent failed: %i\n", ret);
+                return;
+            }
+        }
+    }
 }
 
 static void draw_image(struct vo *vo, mp_image_t *mpi)
 {
     struct priv *p = vo->priv;
+
+    p->front_buf++;
+    p->front_buf %= BUF_COUNT;
 
     if (p->active) {
         if (mpi) {
@@ -386,35 +478,98 @@ static void draw_image(struct vo *vo, mp_image_t *mpi)
     }
 }
 
-static void flip_page(struct vo *vo)
+static void enqueue_frame(struct vo *vo, struct framebuffer *fb)
 {
     struct priv *p = vo->priv;
-    if (!p->active || p->pflip_happening)
-        return;
 
-    int ret = drmModePageFlip(p->kms->fd, p->kms->crtc_id,
-                              p->bufs[p->front_buf].fb,
-                              DRM_MODE_PAGE_FLIP_EVENT, p);
+    p->vsync.sbc++;
+    struct kms_frame *new_frame = talloc(p, struct kms_frame);
+    new_frame->fb = fb;
+    new_frame->vsync = p->vsync;
+    MP_TARRAY_APPEND(p, p->fb_queue, p->fb_queue_len, new_frame);
+}
+
+static void dequeue_frame(struct vo *vo)
+{
+    struct priv *p = vo->priv;
+
+    talloc_free(p->fb_queue[0]);
+    MP_TARRAY_REMOVE_AT(p->fb_queue, p->fb_queue_len, 0);
+}
+
+static void swapchain_step(struct vo *vo)
+{
+    struct priv *p = vo->priv;
+
+    if (p->fb_queue_len > 0) {
+        dequeue_frame(vo);
+    }
+}
+
+static void draw_frame(struct vo *vo, struct vo_frame *frame)
+{
+    struct priv *p = vo->priv;
+
+    p->still = frame->still;
+
+    // we redraw the entire image when OSD needs to be redrawn
+    const bool repeat = frame->repeat && !frame->redraw;
+
+    struct framebuffer *new_fb = NULL;
+    if (repeat) {
+        new_fb = &p->bufs[p->front_buf];
+    } else {
+        draw_image(vo, mp_image_new_ref(frame->current));
+        new_fb = &p->bufs[p->front_buf];
+    }
+
+    enqueue_frame(vo, new_fb);
+}
+
+static void queue_flip(struct vo *vo, struct kms_frame *frame)
+{
+    int ret = 0;
+    struct priv *p = vo->priv;
+
+    p->cur_fb = frame->fb;
+
+    // Alloc and fill the data struct for the page flip callback
+    struct pflip_cb_closure *data = talloc(p, struct pflip_cb_closure);
+    data->priv = p;
+    data->frame = frame;
+
+    ret = drmModePageFlip(p->kms->fd, p->kms->crtc_id,
+                          p->cur_fb->fb,
+                          DRM_MODE_PAGE_FLIP_EVENT, data);
     if (ret) {
         MP_WARN(vo, "Failed to queue page flip: %s\n", mp_strerror(errno));
     } else {
-        p->front_buf++;
-        p->front_buf %= BUF_COUNT;
-        p->pflip_happening = true;
+        p->waiting_for_flip = true;
     }
 
-    // poll page flip finish event
-    const int timeout_ms = 3000;
-    struct pollfd fds[1] = {
-        { .events = POLLIN, .fd = p->kms->fd },
-    };
-    poll(fds, 1, timeout_ms);
-    if (fds[0].revents & POLLIN) {
-        ret = drmHandleEvent(p->kms->fd, &p->ev);
-        if (ret != 0) {
-            MP_ERR(vo, "drmHandleEvent failed: %i\n", ret);
-            return;
+}
+
+static void flip_page(struct vo *vo)
+{
+    struct priv *p = vo->priv;
+    const bool drain = p->paused || p->still;
+
+    if (!p->active)
+        return;
+
+    while (drain || p->fb_queue_len > SWAPCHAIN_DEPTH) {
+        if (p->waiting_for_flip) {
+            wait_on_flip(vo);
+            swapchain_step(vo);
         }
+        if (p->fb_queue_len <= 1)
+            break;
+        if (!p->fb_queue[1] || !p->fb_queue[1]->fb) {
+            MP_ERR(vo, "Hole in swapchain?\n");
+            swapchain_step(vo);
+            continue;
+        }
+        queue_flip(vo, p->fb_queue[1]);
     }
 }
 
@@ -471,8 +626,8 @@ static int preinit(struct vo *vo)
         p->imgfmt = IMGFMT_XRGB8888;
     }
 
-    if (!fb_setup_double_buffering(vo)) {
-        MP_ERR(vo, "Failed to set up double buffering.\n");
+    if (!fb_setup_buffers(vo)) {
+        MP_ERR(vo, "Failed to set up buffers.\n");
         goto err;
     }
 
@@ -499,6 +654,10 @@ static int preinit(struct vo *vo)
     }
     mp_verbose(vo->log, "Monitor pixel aspect: %g\n", vo->monitor_par);
 
+    p->vsync_info.vsync_duration = 0;
+    p->vsync_info.skipped_vsyncs = -1;
+    p->vsync_info.last_queue_display_time = -1;
+
     return 0;
 
 err:
@@ -519,7 +678,8 @@ static int control(struct vo *vo, uint32_t request, void *arg)
         *(struct mp_image**)arg = mp_image_new_copy(p->cur_frame);
         return VO_TRUE;
     case VOCTRL_REDRAW_FRAME:
-        draw_image(vo, p->last_input);
+        draw_image(vo, p->last_input); // TODO: this works?
+        enqueue_frame(vo, &p->bufs[p->front_buf]); // TODO: this doesn't "overflow"?
         return VO_TRUE;
     case VOCTRL_SET_PANSCAN:
         if (vo->config_ok)
@@ -532,6 +692,16 @@ static int control(struct vo *vo, uint32_t request, void *arg)
         *(double*)arg = fps;
         return VO_TRUE;
     }
+    case VOCTRL_PAUSE:
+        p->paused = true;
+        return VO_TRUE;
+    case VOCTRL_RESUME:
+        p->paused = false;
+        p->vsync_info.last_queue_display_time = -1;
+        p->vsync_info.skipped_vsyncs = 0;
+        p->vsync.ust = 0;
+        p->vsync.msc = 0;
+        return VO_TRUE;
     }
     return VO_NOTIMPL;
 }
@@ -545,8 +715,9 @@ const struct vo_driver video_out_drm = {
     .query_format = query_format,
     .reconfig = reconfig,
     .control = control,
-    .draw_image = draw_image,
+    .draw_frame = draw_frame,
     .flip_page = flip_page,
+    .get_vsync = get_vsync,
     .uninit = uninit,
     .wait_events = wait_events,
     .wakeup = wakeup,
