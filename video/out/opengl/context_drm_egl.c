@@ -46,16 +46,9 @@ struct framebuffer
     uint32_t id;
 };
 
-struct vsync_tuple
-{
-    uint64_t ust;
-    unsigned int msc;
-    unsigned int sbc;
-};
-
 struct gbm_frame {
     struct gbm_bo *bo;
-    struct vsync_tuple vsync;
+    struct drm_vsync_tuple vsync;
 };
 
 struct gbm
@@ -98,7 +91,7 @@ struct priv {
     bool still;
     bool paused;
 
-    struct vsync_tuple vsync;
+    struct drm_vsync_tuple vsync;
     struct vo_vsync_info vsync_info;
 
     struct mpv_opengl_drm_params drm_params;
