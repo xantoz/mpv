@@ -370,6 +370,7 @@ def build(ctx):
         ( "stream/stream_dvd.c",                 "dvdread-common" ),
         ( "stream/stream_dvd_common.c",          "dvdread-common" ),
         ( "stream/stream_dvdnav.c",              "dvdnav" ),
+        ( "stream/stream_concat.c" ),
         ( "stream/stream_edl.c" ),
         ( "stream/stream_file.c" ),
         ( "stream/stream_lavf.c" ),
