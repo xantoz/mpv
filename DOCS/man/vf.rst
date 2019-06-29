@@ -16,7 +16,7 @@ The exact syntax is:
     name is an arbitrary user-given name, which identifies the filter. This
     is only needed if you want to toggle the filter at runtime.
 
-    A ``!`` before the filter name means the filter is enabled by default. It
+    A ``!`` before the filter name means the filter is disabled by default. It
     will be skipped on filter creation. This is also useful for runtime filter
     toggling.
 
@@ -468,8 +468,9 @@ Available mpv-only filters are:
     other userdata type will result in hard crashes.
 
 ``vavpp``
-    VA-AP-API video post processing. Works with ``--vo=vaapi`` and ``--vo=gpu``
-    only. Currently deinterlaces. This filter is automatically inserted if
+    VA-API video post processing. Requires the system to support VA-API,
+    i.e. Linux/BSD only. Works with ``--vo=vaapi`` and ``--vo=gpu`` only.
+    Currently deinterlaces. This filter is automatically inserted if
     deinterlacing is requested (either using the ``d`` key, by default mapped to
     the command ``cycle deinterlace``, or the ``--deinterlace`` option).
 
