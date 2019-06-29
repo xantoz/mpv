@@ -921,8 +921,7 @@ Input Commands that are Possibly Subject to Change
         ``--glsl-shader=file.glsl``.
 
 
-Undocumented commands: ``tv-last-channel`` (TV/DVB only),
-``ao-reload`` (experimental/internal).
+Undocumented commands: ``ao-reload`` (experimental/internal).
 
 Hooks
 ~~~~~
@@ -1182,8 +1181,6 @@ Property list
 ``media-title``
     If the currently played file has a ``title`` tag, use that.
 
-    Otherwise, if the media type is DVD, return the volume ID of DVD.
-
     Otherwise, return the ``filename`` property.
 
 ``file-format``
@@ -1296,40 +1293,6 @@ Property list
     Current MKV edition number. Setting this property to a different value will
     restart playback. The number of the first edition is 0.
 
-``disc-titles``
-    Number of BD/DVD titles.
-
-    This has a number of sub-properties. Replace ``N`` with the 0-based edition
-    index.
-
-    ``disc-titles/count``
-        Number of titles.
-
-    ``disc-titles/id``
-        Title ID as integer. Currently, this is the same as the title index.
-
-    ``disc-titles/length``
-        Length in seconds. Can be unavailable in a number of cases (currently
-        it works for libdvdnav only).
-
-    When querying the property with the client API using ``MPV_FORMAT_NODE``,
-    or with Lua ``mp.get_property_native``, this will return a mpv_node with
-    the following contents:
-
-    ::
-
-        MPV_FORMAT_NODE_ARRAY
-            MPV_FORMAT_NODE_MAP (for each edition)
-                "id"                MPV_FORMAT_INT64
-                "length"            MPV_FORMAT_DOUBLE
-
-``disc-title-list``
-    List of BD/DVD titles.
-
-``disc-title`` (RW)
-    Current BD/DVD title number. Writing works only for ``dvdnav://`` and
-    ``bd://`` (and aliases for these).
-
 ``chapters``
     Number of chapters.
 
@@ -1368,9 +1331,6 @@ Property list
                 "id"                MPV_FORMAT_INT64
                 "title"             MPV_FORMAT_STRING
                 "default"           MPV_FORMAT_FLAG
-
-``angle`` (RW)
-    Current DVD angle.
 
 ``metadata``
     Metadata key/value pairs.
@@ -1490,8 +1450,21 @@ Property list
     buffering amount, while the seek ranges represent the buffered data that
     can actually be used for cached seeking.
 
+    ``bof-cached`` indicates whether the seek range with the lowest timestamp
+    points to the beginning of the stream (BOF). This implies you cannot seek
+    before this position at all. ``eof-cached`` indicates whether the seek range
+    with the highest timestamp points to the end of the stream (EOF). If both
+    ``bof-cached`` and ``eof-cached`` are set to ``yes``, and there's only 1
+    cache range, the entire stream is cached.
+
     ``fw-bytes`` is the number of bytes of packets buffered in the range
-    starting from the current decoding position.
+    starting from the current decoding position. This is a rough estimate
+    (may not account correctly for various overhead), and stops at the
+    demuxer position (it ignores seek ranges after it).
+
+    ``file-cache-bytes`` is the number of bytes stored in the file cache. This
+    includes all overhead, and possibly unused data (like pruned data). This
+    member is missing if the file cache is not active.
 
     When querying the property with the client API using ``MPV_FORMAT_NODE``,
     or with Lua ``mp.get_property_native``, this will return a mpv_node with
@@ -1504,7 +1477,10 @@ Property list
                 MPV_FORMAT_NODE_MAP
                     "start"             MPV_FORMAT_DOUBLE
                     "end"               MPV_FORMAT_DOUBLE
+            "bof-cached"        MPV_FORMAT_FLAG
+            "eof-cached"        MPV_FORMAT_FLAG
             "fw-bytes"          MPV_FORMAT_INT64
+            "file-cache-bytes"  MPV_FORMAT_INT64
 
     Other fields (might be changed or removed in the future):
 
@@ -1521,11 +1497,6 @@ Property list
     ``total-bytes``
         Sum of packet bytes (plus some overhead estimation) of the entire packet
         queue, including cached seekable ranges.
-
-    ``fw-bytes``
-        Sum of packet bytes (plus some overhead estimation) of the readahead
-        packet queue (packets between current decoder reader positions and
-        demuxer position).
 
 ``demuxer-via-network``
     Returns ``yes`` if the stream demuxed via the main demuxer is most likely
@@ -1851,27 +1822,12 @@ Property list
 ``osd-par``
     Last known OSD display pixel aspect (can be 0).
 
-``program`` (W)
-    Switch TS program (write-only).
-
-``dvb-channel`` (W)
-    Pair of integers: card,channel of current DVB stream.
-    Can be switched to switch to another channel on the same card.
-
-``dvb-channel-name`` (RW)
-    Name of current DVB program.
-    On write, a channel-switch to the named channel on the same
-    card is performed. Can also be used for channel switching.
-
 ``sub-text``
     Return the current subtitle text. Formatting is stripped. If a subtitle
     is selected, but no text is currently visible, or the subtitle is not
     text-based (i.e. DVD/BD subtitles), an empty string is returned.
 
     This property is experimental and might be removed in the future.
-
-``tv-brightness``, ``tv-contrast``, ``tv-saturation``, ``tv-hue`` (RW)
-    TV stuff.
 
 ``playlist-pos`` (RW)
     Current position on playlist. The first entry is on position 0. Writing

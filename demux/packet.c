@@ -31,11 +31,25 @@
 
 #include "packet.h"
 
+// Free any refcounted data dp holds (but don't free dp itself). This does not
+// care about pointers that are _not_ refcounted (like demux_packet.codec).
+// Normally, a user should use talloc_free(dp). This function is only for
+// annoyingly specific obscure use cases.
+void demux_packet_unref_contents(struct demux_packet *dp)
+{
+    if (dp->avpacket) {
+        av_packet_unref(dp->avpacket);
+        assert(!dp->is_cached);
+        dp->avpacket = NULL;
+        dp->buffer = NULL;
+        dp->len = 0;
+    }
+}
+
 static void packet_destroy(void *ptr)
 {
     struct demux_packet *dp = ptr;
-    av_packet_unref(dp->avpacket);
-    mp_packet_tags_unref(dp->metadata);
+    demux_packet_unref_contents(dp);
 }
 
 // This actually preserves only data and side data, not PTS/DTS/pos/etc.
@@ -56,7 +70,6 @@ struct demux_packet *new_demux_packet_from_avpacket(struct AVPacket *avpkt)
         .end = MP_NOPTS_VALUE,
         .stream = -1,
         .avpacket = talloc_zero(dp, AVPacket),
-        .kf_seek_pts = MP_NOPTS_VALUE,
     };
     av_init_packet(dp->avpacket);
     int r = -1;
@@ -129,9 +142,10 @@ void demux_packet_copy_attribs(struct demux_packet *dst, struct demux_packet *sr
     dst->start = src->start;
     dst->end = src->end;
     dst->codec = src->codec;
+    dst->back_restart = src->back_restart;
+    dst->back_preroll = src->back_preroll;
     dst->keyframe = src->keyframe;
     dst->stream = src->stream;
-    mp_packet_tags_setref(&dst->metadata, src->metadata);
 }
 
 struct demux_packet *demux_copy_packet(struct demux_packet *dp)
@@ -162,8 +176,9 @@ struct demux_packet *demux_copy_packet(struct demux_packet *dp)
 size_t demux_packet_estimate_total_size(struct demux_packet *dp)
 {
     size_t size = ROUND_ALLOC(sizeof(struct demux_packet));
-    size += ROUND_ALLOC(dp->len);
     if (dp->avpacket) {
+        assert(!dp->is_cached);
+        size += ROUND_ALLOC(dp->len);
         size += ROUND_ALLOC(sizeof(AVPacket));
         size += ROUND_ALLOC(sizeof(AVBufferRef));
         size += 64; // upper bound estimate on sizeof(AVBuffer)
