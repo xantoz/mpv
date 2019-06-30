@@ -5049,9 +5049,6 @@ The following video options are currently all specific to ``--vo=gpu`` and
         X11/GLX
     x11vk
         VK_KHR_xlib_surface
-    x11probe
-        For internal autoprobing, equivalent to ``x11`` otherwise. Don't use
-        directly, it could be removed without warning as autoprobing is changed.
     wayland
         Wayland/EGL
     waylandvk
@@ -5062,8 +5059,6 @@ The following video options are currently all specific to ``--vo=gpu`` and
         X11/EGL
     android
         Android/EGL. Requires ``--wid`` be set to an ``android.view.Surface``.
-    mali-fbdev
-        Direct fbdev/EGL support on some ARM/MALI devices.
     vdpauglx
         Use vdpau presentation with GLX as backing. Experimental use only.
         Using this will have no advantage (other than additional bugs or

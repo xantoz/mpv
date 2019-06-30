@@ -150,9 +150,7 @@ main_dependencies = [
     }, {
         'name': 'posix',
         'desc': 'POSIX environment',
-        # This should be good enough.
-        'func': check_statement(['poll.h', 'unistd.h', 'sys/mman.h'],
-            'struct pollfd pfd; poll(&pfd, 1, 0); fork(); int f[2]; pipe(f); munmap(f,0)'),
+        'func': check_statement(['unistd.h'], 'long x = _POSIX_VERSION'),
     }, {
         'name': '--android',
         'desc': 'Android environment',
@@ -368,19 +366,9 @@ iconv support use --disable-iconv.",
         'func': check_pkg_config('lcms2', '>= 2.6'),
     }, {
         'name': '--vapoursynth',
-        'desc': 'VapourSynth filter bridge (Python)',
+        'desc': 'VapourSynth filter bridge',
         'func': check_pkg_config('vapoursynth',        '>= 24',
                                  'vapoursynth-script', '>= 23'),
-    }, {
-        'name': '--vapoursynth-lazy',
-        'desc': 'VapourSynth filter bridge (Lazy Lua)',
-        'deps': 'lua',
-        'func': check_pkg_config('vapoursynth',        '>= 24'),
-    }, {
-        'name': 'vapoursynth-core',
-        'desc': 'VapourSynth filter bridge (core)',
-        'deps': 'vapoursynth || vapoursynth-lazy',
-        'func': check_true,
     }, {
         'name': '--libarchive',
         'desc': 'libarchive wrapper for reading zip files and more',
@@ -769,19 +757,10 @@ video_output_features = [
         'deps': 'libmpv-shared || libmpv-static',
         'func': check_true,
     }, {
-        'name': '--mali-fbdev',
-        'desc': 'MALI via Linux fbdev',
-        'deps': 'libdl',
-        'func': compose_checks(
-            check_cc(lib="EGL"),
-            check_statement('EGL/fbdev_window.h', 'struct fbdev_window test'),
-            check_statement('linux/fb.h', 'struct fb_var_screeninfo test'),
-        ),
-    }, {
         'name': '--gl',
         'desc': 'OpenGL context support',
         'deps': 'gl-cocoa || gl-x11 || egl-x11 || egl-drm || '
-                 + 'gl-win32 || gl-wayland || rpi || mali-fbdev || '
+                 + 'gl-win32 || gl-wayland || rpi || '
                  + 'plain-gl',
         'func': check_true,
         'req': True,
@@ -800,7 +779,7 @@ video_output_features = [
     }, {
         'name': 'egl-helpers',
         'desc': 'EGL helper functions',
-        'deps': 'egl-x11 || mali-fbdev || rpi || gl-wayland || egl-drm || ' +
+        'deps': 'egl-x11 || rpi || gl-wayland || egl-drm || ' +
                 'egl-angle-win32 || egl-android',
         'func': check_true
     }
