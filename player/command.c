@@ -2031,6 +2031,8 @@ static int get_track_entry(int item, int action, void *arg, void *ctx)
         {"default",     SUB_PROP_FLAG(track->default_track)},
         {"forced",      SUB_PROP_FLAG(track->forced_track)},
         {"dependent",   SUB_PROP_FLAG(track->dependent_track)},
+        {"visual-impaired",  SUB_PROP_FLAG(track->visual_impaired_track)},
+        {"hearing-impaired", SUB_PROP_FLAG(track->hearing_impaired_track)},
         {"external",    SUB_PROP_FLAG(track->is_external)},
         {"selected",    SUB_PROP_FLAG(track->selected)},
         {"external-filename", SUB_PROP_STR(track->external_filename),
@@ -3694,6 +3696,7 @@ static bool is_property_set(int action, void *val)
     case M_PROPERTY_SWITCH:
     case M_PROPERTY_SET_STRING:
     case M_PROPERTY_SET_NODE:
+    case M_PROPERTY_MULTIPLY:
         return true;
     case M_PROPERTY_KEY_ACTION: {
         struct m_property_action_arg *key = val;
