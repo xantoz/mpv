@@ -2991,8 +2991,7 @@ static void demux_init_ccs(struct demuxer *demuxer, struct demux_opts *opts)
 bool demux_is_network_cached(demuxer_t *demuxer)
 {
     struct demux_internal *in = demuxer->in;
-    bool use_cache =
-        demuxer->is_network || (demuxer->stream && demuxer->stream->streaming);
+    bool use_cache = demuxer->stream->streaming;
     if (in->opts->enable_cache >= 0)
         use_cache = in->opts->enable_cache == 1;
     return use_cache;
