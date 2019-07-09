@@ -3139,6 +3139,13 @@ Demuxer
     the situation that the forward seek range starts after the current playback
     position (as it removes past packets that are seek points).
 
+    If the end of the file is reached, the remaining unused forward buffer space
+    is "donated" to the backbuffer (unless the backbuffer size is set to 0).
+    This still limits the total cache usage to the sum of the forward and
+    backward cache, and effectively makes better use of the total allowed memory
+    budget. (The opposite does not happen: free backward buffer is never
+    "donated" to the forward buffer.)
+
     Keep in mind that other buffers in the player (like decoders) will cause the
     demuxer to cache "future" frames in the back buffer, which can skew the
     impression about how much data the backbuffer contains.
@@ -5795,10 +5802,8 @@ Miscellaneous
 
     If this is set at runtime, the old file is closed, and the new file is
     opened. Note that this will write only data that is appended at the end of
-    the cache, and the already cached data cannot be written. (A fix for that
-    would be a command that dumps the cache using a given time range, possibly
-    with the option to be open-ended, which would continue to write data
-    appended to the cache. Such a command doesn't exist yet.)
+    the cache, and the already cached data cannot be written. You can try the
+    ``dump-cache`` command as an alternative.
 
 ``--lavfi-complex=<string>``
     Set a "complex" libavfilter filter, which means a single filter graph can
