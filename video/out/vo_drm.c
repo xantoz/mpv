@@ -44,7 +44,6 @@
 
 #define BYTES_PER_PIXEL 4
 #define BITS_PER_PIXEL 32
-#define USE_MASTER 0
 
 #define BUF_COUNT 4
 #define SWAPCHAIN_DEPTH 3
@@ -244,34 +243,6 @@ static void crtc_release(struct vo *vo)
     }
 }
 
-static void release_vt(void *data)
-{
-    struct vo *vo = data;
-    crtc_release(vo);
-    if (USE_MASTER) {
-        //this function enables support for switching to x, weston etc.
-        //however, for whatever reason, it can be called only by root users.
-        //until things change, this is commented.
-        struct priv *p = vo->priv;
-        if (drmDropMaster(p->kms->fd)) {
-            MP_WARN(vo, "Failed to drop DRM master: %s\n", mp_strerror(errno));
-        }
-    }
-}
-
-static void acquire_vt(void *data)
-{
-    struct vo *vo = data;
-    if (USE_MASTER) {
-        struct priv *p = vo->priv;
-        if (drmSetMaster(p->kms->fd)) {
-            MP_WARN(vo, "Failed to acquire DRM master: %s\n", mp_strerror(errno));
-        }
-    }
-
-    crtc_setup(vo);
-}
-
 static void wait_events(struct vo *vo, int64_t until_time_us)
 {
     struct priv *p = vo->priv;
@@ -374,26 +345,26 @@ static void draw_image(struct vo *vo, mp_image_t *mpi, struct framebuffer *front
 {
     struct priv *p = vo->priv;
 
-    if (p->active && front_buf != NULL) {
-        if (mpi) {
-            struct mp_image src = *mpi;
-            struct mp_rect src_rc = p->src;
-            src_rc.x0 = MP_ALIGN_DOWN(src_rc.x0, mpi->fmt.align_x);
-            src_rc.y0 = MP_ALIGN_DOWN(src_rc.y0, mpi->fmt.align_y);
-            mp_image_crop_rc(&src, src_rc);
+    if (mpi) {
+        struct mp_image src = *mpi;
+        struct mp_rect src_rc = p->src;
+        src_rc.x0 = MP_ALIGN_DOWN(src_rc.x0, mpi->fmt.align_x);
+        src_rc.y0 = MP_ALIGN_DOWN(src_rc.y0, mpi->fmt.align_y);
+        mp_image_crop_rc(&src, src_rc);
 
-            mp_image_clear(p->cur_frame, 0, 0, p->cur_frame->w, p->dst.y0);
-            mp_image_clear(p->cur_frame, 0, p->dst.y1, p->cur_frame->w, p->cur_frame->h);
-            mp_image_clear(p->cur_frame, 0, p->dst.y0, p->dst.x0, p->dst.y1);
-            mp_image_clear(p->cur_frame, p->dst.x1, p->dst.y0, p->cur_frame->w, p->dst.y1);
+        mp_image_clear(p->cur_frame, 0, 0, p->cur_frame->w, p->dst.y0);
+        mp_image_clear(p->cur_frame, 0, p->dst.y1, p->cur_frame->w, p->cur_frame->h);
+        mp_image_clear(p->cur_frame, 0, p->dst.y0, p->dst.x0, p->dst.y1);
+        mp_image_clear(p->cur_frame, p->dst.x1, p->dst.y0, p->cur_frame->w, p->dst.y1);
 
-            mp_sws_scale(p->sws, p->cur_frame_cropped, &src);
-            osd_draw_on_image(vo->osd, p->osd, src.pts, 0, p->cur_frame);
-        } else {
-            mp_image_clear(p->cur_frame, 0, 0, p->cur_frame->w, p->cur_frame->h);
-            osd_draw_on_image(vo->osd, p->osd, 0, 0, p->cur_frame);
-        }
+        mp_sws_scale(p->sws, p->cur_frame_cropped, &src);
+        osd_draw_on_image(vo->osd, p->osd, src.pts, 0, p->cur_frame);
+    } else {
+        mp_image_clear(p->cur_frame, 0, 0, p->cur_frame->w, p->cur_frame->h);
+        osd_draw_on_image(vo->osd, p->osd, 0, 0, p->cur_frame);
+    }
 
+    if (p->active) {
         if (p->depth == 30) {
             // Pack GBRP10 image into XRGB2101010 for DRM
             const int w = p->cur_frame->w;
@@ -528,7 +499,7 @@ static void flip_page(struct vo *vo)
     }
 }
 
-static void uninit(struct vo *vo)
+static void close_kms(struct vo *vo)
 {
     struct priv *p = vo->priv;
 
@@ -544,29 +515,13 @@ static void uninit(struct vo *vo)
         kms_destroy(p->kms);
         p->kms = NULL;
     }
-
-    if (p->vt_switcher_active)
-        vt_switcher_destroy(&p->vt_switcher);
-
-    talloc_free(p->last_input);
-    talloc_free(p->cur_frame);
-    talloc_free(p->cur_frame_cropped);
 }
 
-static int preinit(struct vo *vo)
+static int open_kms(struct vo *vo)
 {
     struct priv *p = vo->priv;
-    p->sws = mp_sws_alloc(vo);
-    p->ev.version = DRM_EVENT_CONTEXT_VERSION;
-    p->ev.page_flip_handler = &drm_pflip_cb;
 
-    p->vt_switcher_active = vt_switcher_init(&p->vt_switcher, vo->log);
-    if (p->vt_switcher_active) {
-        vt_switcher_acquire(&p->vt_switcher, acquire_vt, vo);
-        vt_switcher_release(&p->vt_switcher, release_vt, vo);
-    } else {
-        MP_WARN(vo, "Failed to set up VT switcher. Terminal switching will be unavailable.\n");
-    }
+    assert(p->kms == NULL);
 
     p->kms = kms_create(vo->log,
                         vo->opts->drm_opts->drm_connector_spec,
@@ -574,7 +529,7 @@ static int preinit(struct vo *vo)
                         0, 0, false);
     if (!p->kms) {
         MP_ERR(vo, "Failed to create KMS.\n");
-        goto err;
+        return -1;
     }
 
     if (vo->opts->drm_opts->drm_format == DRM_OPTS_FORMAT_XRGB2101010) {
@@ -587,14 +542,14 @@ static int preinit(struct vo *vo)
 
     if (!fb_setup_buffers(vo)) {
         MP_ERR(vo, "Failed to set up buffers.\n");
-        goto err;
+        return -1;
     }
 
     uint64_t has_dumb;
     if (drmGetCap(p->kms->fd, DRM_CAP_DUMB_BUFFER, &has_dumb) < 0) {
         MP_ERR(vo, "Card \"%d\" does not support dumb buffers.\n",
                p->kms->card_no);
-        goto err;
+        return -1;
     }
 
     p->screen_w = p->bufs[0].width;
@@ -602,7 +557,7 @@ static int preinit(struct vo *vo)
 
     if (!crtc_setup(vo)) {
         MP_ERR(vo, "Cannot set CRTC: %s\n", mp_strerror(errno));
-        goto err;
+        return -1;
     }
 
     if (vo->opts->force_monitor_aspect != 0.0) {
@@ -618,10 +573,60 @@ static int preinit(struct vo *vo)
     p->vsync_info.last_queue_display_time = -1;
 
     return 0;
+}
 
-err:
-    uninit(vo);
-    return -1;
+static void uninit(struct vo *vo)
+{
+    struct priv *p = vo->priv;
+
+    if (p->vt_switcher_active)
+        vt_switcher_destroy(&p->vt_switcher);
+
+    close_kms(vo);
+
+    talloc_free(p->last_input);
+    talloc_free(p->cur_frame);
+    talloc_free(p->cur_frame_cropped);
+}
+
+static void release_vt(void *data)
+{
+    struct vo *vo = data;
+    close_kms(vo);
+}
+
+static void acquire_vt(void *data)
+{
+    struct vo *vo = data;
+    struct priv *p = vo->priv;
+
+    open_kms(vo);
+    /* draw_image(vo, p->last_input); // TODO: this works? */
+    /* enqueue_frame(vo, &p->bufs[p->front_buf]); // TODO: this doesn't "overflow"? */
+    /* queue_flip(); */
+}
+
+static int preinit(struct vo *vo)
+{
+    struct priv *p = vo->priv;
+    p->sws = mp_sws_alloc(vo);
+    p->ev.version = DRM_EVENT_CONTEXT_VERSION;
+    p->ev.page_flip_handler = drm_pflip_cb;
+
+    p->vt_switcher_active = vt_switcher_init(&p->vt_switcher, vo->log);
+    if (p->vt_switcher_active) {
+        vt_switcher_acquire(&p->vt_switcher, acquire_vt, vo);
+        vt_switcher_release(&p->vt_switcher, release_vt, vo);
+    } else {
+        MP_WARN(vo, "Failed to set up VT switcher. Terminal switching will be unavailable.\n");
+    }
+
+    if (open_kms(vo) == 0) {
+        return 0;
+    } else {
+        uninit(vo);
+        return -1;
+    }
 }
 
 static int query_format(struct vo *vo, int format)
