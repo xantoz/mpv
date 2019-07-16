@@ -580,7 +580,9 @@ static void uninit(struct vo *vo)
 {
     struct priv *p = vo->priv;
 
-    crtc_release(vo);
+    while (p->fb_queue_len > 0) {
+        swapchain_step(vo);
+    }
 
     if (p->kms) {
         for (unsigned int i = 0; i < BUF_COUNT; i++)
