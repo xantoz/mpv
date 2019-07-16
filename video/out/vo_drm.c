@@ -387,13 +387,6 @@ static void draw_image(struct vo *vo, mp_image_t *mpi)
 {
     struct priv *p = vo->priv;
 
-    if (!p->active) {
-        return;
-    }
-
-    p->front_buf++;
-    p->front_buf %= BUF_COUNT;
-
     if (mpi) {
         struct mp_image src = *mpi;
         struct mp_rect src_rc = p->src;
@@ -413,36 +406,41 @@ static void draw_image(struct vo *vo, mp_image_t *mpi)
         osd_draw_on_image(vo->osd, p->osd, 0, 0, p->cur_frame);
     }
 
-    struct framebuffer *front_buf = &p->bufs[p->front_buf];
+    if (p->active) {
+        p->front_buf++;
+        p->front_buf %= BUF_COUNT;
 
-    if (p->depth == 30) {
-        // Pack GBRP10 image into XRGB2101010 for DRM
-        const int w = p->cur_frame->w;
-        const int h = p->cur_frame->h;
+        struct framebuffer *front_buf = &p->bufs[p->front_buf];
 
-        const int g_padding = p->cur_frame->stride[0]/sizeof(uint16_t) - w;
-        const int b_padding = p->cur_frame->stride[1]/sizeof(uint16_t) - w;
-        const int r_padding = p->cur_frame->stride[2]/sizeof(uint16_t) - w;
-        const int fbuf_padding = front_buf->stride/sizeof(uint32_t) - w;
+        if (p->depth == 30) {
+            // Pack GBRP10 image into XRGB2101010 for DRM
+            const int w = p->cur_frame->w;
+            const int h = p->cur_frame->h;
 
-        uint16_t *g_ptr = (uint16_t*)p->cur_frame->planes[0];
-        uint16_t *b_ptr = (uint16_t*)p->cur_frame->planes[1];
-        uint16_t *r_ptr = (uint16_t*)p->cur_frame->planes[2];
-        uint32_t *fbuf_ptr = (uint32_t*)front_buf->map;
-        for (unsigned y = 0; y < h; ++y) {
-            for (unsigned x = 0; x < w; ++x) {
-                *fbuf_ptr++ = (*r_ptr++ << 20) | (*g_ptr++ << 10) | (*b_ptr++);
+            const int g_padding = p->cur_frame->stride[0]/sizeof(uint16_t) - w;
+            const int b_padding = p->cur_frame->stride[1]/sizeof(uint16_t) - w;
+            const int r_padding = p->cur_frame->stride[2]/sizeof(uint16_t) - w;
+            const int fbuf_padding = front_buf->stride/sizeof(uint32_t) - w;
+
+            uint16_t *g_ptr = (uint16_t*)p->cur_frame->planes[0];
+            uint16_t *b_ptr = (uint16_t*)p->cur_frame->planes[1];
+            uint16_t *r_ptr = (uint16_t*)p->cur_frame->planes[2];
+            uint32_t *fbuf_ptr = (uint32_t*)front_buf->map;
+            for (unsigned y = 0; y < h; ++y) {
+                for (unsigned x = 0; x < w; ++x) {
+                    *fbuf_ptr++ = (*r_ptr++ << 20) | (*g_ptr++ << 10) | (*b_ptr++);
+                }
+                g_ptr += g_padding;
+                b_ptr += b_padding;
+                r_ptr += r_padding;
+                fbuf_ptr += fbuf_padding;
             }
-            g_ptr += g_padding;
-            b_ptr += b_padding;
-            r_ptr += r_padding;
-            fbuf_ptr += fbuf_padding;
+        } else {
+            memcpy_pic(front_buf->map, p->cur_frame->planes[0],
+                       p->cur_frame->w * BYTES_PER_PIXEL, p->cur_frame->h,
+                       front_buf->stride,
+                       p->cur_frame->stride[0]);
         }
-    } else {
-        memcpy_pic(front_buf->map, p->cur_frame->planes[0],
-                   p->cur_frame->w * BYTES_PER_PIXEL, p->cur_frame->h,
-                   front_buf->stride,
-                   p->cur_frame->stride[0]);
     }
 
     if (mpi != p->last_input) {
@@ -648,7 +646,12 @@ static void release_vt(void *data)
 static void acquire_vt(void *data)
 {
     struct vo *vo = data;
+    struct priv *p = vo->priv;
+
     open_kms(vo);
+    /* draw_image(vo, p->last_input); // TODO: this works? */
+    /* enqueue_frame(vo, &p->bufs[p->front_buf]); // TODO: this doesn't "overflow"? */
+    /* queue_flip(); */
 }
 
 static int preinit(struct vo *vo)
