@@ -416,10 +416,10 @@ static void draw_image(struct vo *vo, mp_image_t *mpi)
 {
     struct priv *p = vo->priv;
 
-    p->front_buf++;
-    p->front_buf %= BUF_COUNT;
-
     if (p->active) {
+        p->front_buf++;
+        p->front_buf %= BUF_COUNT;
+
         if (mpi) {
             struct mp_image src = *mpi;
             struct mp_rect src_rc = p->src;
