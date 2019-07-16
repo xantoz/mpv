@@ -45,7 +45,6 @@
 
 #define BYTES_PER_PIXEL 4
 #define BITS_PER_PIXEL 32
-#define USE_MASTER 1
 
 #define BUF_COUNT 4
 #define SWAPCHAIN_DEPTH 3
@@ -294,34 +293,6 @@ static void crtc_release(struct vo *vo)
     }
 }
 
-static void release_vt(void *data)
-{
-    struct vo *vo = data;
-    crtc_release(vo);
-    if (USE_MASTER) {
-        //this function enables support for switching to x, weston etc.
-        //however, for whatever reason, it can be called only by root users.
-        //until things change, this is commented.
-        struct priv *p = vo->priv;
-        if (drmDropMaster(p->kms->fd)) {
-            MP_WARN(vo, "Failed to drop DRM master: %s\n", mp_strerror(errno));
-        }
-    }
-}
-
-static void acquire_vt(void *data)
-{
-    struct vo *vo = data;
-    if (USE_MASTER) {
-        struct priv *p = vo->priv;
-        if (drmSetMaster(p->kms->fd)) {
-            MP_WARN(vo, "Failed to acquire DRM master: %s\n", mp_strerror(errno));
-        }
-    }
-
-    crtc_setup(vo);
-}
-
 static void wait_events(struct vo *vo, int64_t until_time_us)
 {
     struct priv *p = vo->priv;
@@ -416,60 +387,62 @@ static void draw_image(struct vo *vo, mp_image_t *mpi)
 {
     struct priv *p = vo->priv;
 
-    if (p->active) {
-        p->front_buf++;
-        p->front_buf %= BUF_COUNT;
+    if (!p->active) {
+        return;
+    }
 
-        if (mpi) {
-            struct mp_image src = *mpi;
-            struct mp_rect src_rc = p->src;
-            src_rc.x0 = MP_ALIGN_DOWN(src_rc.x0, mpi->fmt.align_x);
-            src_rc.y0 = MP_ALIGN_DOWN(src_rc.y0, mpi->fmt.align_y);
-            mp_image_crop_rc(&src, src_rc);
+    p->front_buf++;
+    p->front_buf %= BUF_COUNT;
 
-            mp_image_clear(p->cur_frame, 0, 0, p->cur_frame->w, p->dst.y0);
-            mp_image_clear(p->cur_frame, 0, p->dst.y1, p->cur_frame->w, p->cur_frame->h);
-            mp_image_clear(p->cur_frame, 0, p->dst.y0, p->dst.x0, p->dst.y1);
-            mp_image_clear(p->cur_frame, p->dst.x1, p->dst.y0, p->cur_frame->w, p->dst.y1);
+    if (mpi) {
+        struct mp_image src = *mpi;
+        struct mp_rect src_rc = p->src;
+        src_rc.x0 = MP_ALIGN_DOWN(src_rc.x0, mpi->fmt.align_x);
+        src_rc.y0 = MP_ALIGN_DOWN(src_rc.y0, mpi->fmt.align_y);
+        mp_image_crop_rc(&src, src_rc);
 
-            mp_sws_scale(p->sws, p->cur_frame_cropped, &src);
-            osd_draw_on_image(vo->osd, p->osd, src.pts, 0, p->cur_frame);
-        } else {
-            mp_image_clear(p->cur_frame, 0, 0, p->cur_frame->w, p->cur_frame->h);
-            osd_draw_on_image(vo->osd, p->osd, 0, 0, p->cur_frame);
-        }
+        mp_image_clear(p->cur_frame, 0, 0, p->cur_frame->w, p->dst.y0);
+        mp_image_clear(p->cur_frame, 0, p->dst.y1, p->cur_frame->w, p->cur_frame->h);
+        mp_image_clear(p->cur_frame, 0, p->dst.y0, p->dst.x0, p->dst.y1);
+        mp_image_clear(p->cur_frame, p->dst.x1, p->dst.y0, p->cur_frame->w, p->dst.y1);
 
-        struct framebuffer *front_buf = &p->bufs[p->front_buf];
+        mp_sws_scale(p->sws, p->cur_frame_cropped, &src);
+        osd_draw_on_image(vo->osd, p->osd, src.pts, 0, p->cur_frame);
+    } else {
+        mp_image_clear(p->cur_frame, 0, 0, p->cur_frame->w, p->cur_frame->h);
+        osd_draw_on_image(vo->osd, p->osd, 0, 0, p->cur_frame);
+    }
 
-        if (p->depth == 30) {
-            // Pack GBRP10 image into XRGB2101010 for DRM
-            const int w = p->cur_frame->w;
-            const int h = p->cur_frame->h;
+    struct framebuffer *front_buf = &p->bufs[p->front_buf];
 
-            const int g_padding = p->cur_frame->stride[0]/sizeof(uint16_t) - w;
-            const int b_padding = p->cur_frame->stride[1]/sizeof(uint16_t) - w;
-            const int r_padding = p->cur_frame->stride[2]/sizeof(uint16_t) - w;
-            const int fbuf_padding = front_buf->stride/sizeof(uint32_t) - w;
+    if (p->depth == 30) {
+        // Pack GBRP10 image into XRGB2101010 for DRM
+        const int w = p->cur_frame->w;
+        const int h = p->cur_frame->h;
 
-            uint16_t *g_ptr = (uint16_t*)p->cur_frame->planes[0];
-            uint16_t *b_ptr = (uint16_t*)p->cur_frame->planes[1];
-            uint16_t *r_ptr = (uint16_t*)p->cur_frame->planes[2];
-            uint32_t *fbuf_ptr = (uint32_t*)front_buf->map;
-            for (unsigned y = 0; y < h; ++y) {
-                for (unsigned x = 0; x < w; ++x) {
-                    *fbuf_ptr++ = (*r_ptr++ << 20) | (*g_ptr++ << 10) | (*b_ptr++);
-                }
-                g_ptr += g_padding;
-                b_ptr += b_padding;
-                r_ptr += r_padding;
-                fbuf_ptr += fbuf_padding;
+        const int g_padding = p->cur_frame->stride[0]/sizeof(uint16_t) - w;
+        const int b_padding = p->cur_frame->stride[1]/sizeof(uint16_t) - w;
+        const int r_padding = p->cur_frame->stride[2]/sizeof(uint16_t) - w;
+        const int fbuf_padding = front_buf->stride/sizeof(uint32_t) - w;
+
+        uint16_t *g_ptr = (uint16_t*)p->cur_frame->planes[0];
+        uint16_t *b_ptr = (uint16_t*)p->cur_frame->planes[1];
+        uint16_t *r_ptr = (uint16_t*)p->cur_frame->planes[2];
+        uint32_t *fbuf_ptr = (uint32_t*)front_buf->map;
+        for (unsigned y = 0; y < h; ++y) {
+            for (unsigned x = 0; x < w; ++x) {
+                *fbuf_ptr++ = (*r_ptr++ << 20) | (*g_ptr++ << 10) | (*b_ptr++);
             }
-        } else {
-            memcpy_pic(front_buf->map, p->cur_frame->planes[0],
-                       p->cur_frame->w * BYTES_PER_PIXEL, p->cur_frame->h,
-                       front_buf->stride,
-                       p->cur_frame->stride[0]);
+            g_ptr += g_padding;
+            b_ptr += b_padding;
+            r_ptr += r_padding;
+            fbuf_ptr += fbuf_padding;
         }
+    } else {
+        memcpy_pic(front_buf->map, p->cur_frame->planes[0],
+                   p->cur_frame->w * BYTES_PER_PIXEL, p->cur_frame->h,
+                   front_buf->stride,
+                   p->cur_frame->stride[0]);
     }
 
     if (mpi != p->last_input) {
@@ -576,9 +549,11 @@ static void flip_page(struct vo *vo)
     }
 }
 
-static void uninit(struct vo *vo)
+static void close_kms(struct vo *vo)
 {
     struct priv *p = vo->priv;
+
+    crtc_release(vo);
 
     while (p->fb_queue_len > 0) {
         swapchain_step(vo);
@@ -590,13 +565,90 @@ static void uninit(struct vo *vo)
         kms_destroy(p->kms);
         p->kms = NULL;
     }
+}
+
+static int open_kms(struct vo *vo)
+{
+    struct priv *p = vo->priv;
+
+    assert(p->kms == NULL);
+
+    p->kms = kms_create(vo->log,
+                        vo->opts->drm_opts->drm_connector_spec,
+                        vo->opts->drm_opts->drm_mode_spec,
+                        0, 0, false);
+    if (!p->kms) {
+        MP_ERR(vo, "Failed to create KMS.\n");
+        return -1;
+    }
+
+    if (vo->opts->drm_opts->drm_format == DRM_OPTS_FORMAT_XRGB2101010) {
+        p->depth = 30;
+        p->imgfmt = IMGFMT_XRGB2101010;
+    } else {
+        p->depth = 24;
+        p->imgfmt = IMGFMT_XRGB8888;
+    }
+
+    if (!fb_setup_buffers(vo)) {
+        MP_ERR(vo, "Failed to set up buffers.\n");
+        return -1;
+    }
+
+    uint64_t has_dumb;
+    if (drmGetCap(p->kms->fd, DRM_CAP_DUMB_BUFFER, &has_dumb) < 0) {
+        MP_ERR(vo, "Card \"%d\" does not support dumb buffers.\n",
+               p->kms->card_no);
+        return -1;
+    }
+
+    p->screen_w = p->bufs[0].width;
+    p->screen_h = p->bufs[0].height;
+
+    if (!crtc_setup(vo)) {
+        MP_ERR(vo, "Cannot set CRTC: %s\n", mp_strerror(errno));
+        return -1;
+    }
+
+    if (vo->opts->force_monitor_aspect != 0.0) {
+        vo->monitor_par = p->screen_w / (double) p->screen_h /
+                          vo->opts->force_monitor_aspect;
+    } else {
+        vo->monitor_par = 1 / vo->opts->monitor_pixel_aspect;
+    }
+    mp_verbose(vo->log, "Monitor pixel aspect: %g\n", vo->monitor_par);
+
+    p->vsync_info.vsync_duration = 0;
+    p->vsync_info.skipped_vsyncs = -1;
+    p->vsync_info.last_queue_display_time = -1;
+
+    return 0;
+}
+
+static void uninit(struct vo *vo)
+{
+    struct priv *p = vo->priv;
 
     if (p->vt_switcher_active)
         vt_switcher_destroy(&p->vt_switcher);
 
+    close_kms(vo);
+
     talloc_free(p->last_input);
     talloc_free(p->cur_frame);
     talloc_free(p->cur_frame_cropped);
+}
+
+static void release_vt(void *data)
+{
+    struct vo *vo = data;
+    close_kms(vo);
+}
+
+static void acquire_vt(void *data)
+{
+    struct vo *vo = data;
+    open_kms(vo);
 }
 
 static int preinit(struct vo *vo)
@@ -614,60 +666,12 @@ static int preinit(struct vo *vo)
         MP_WARN(vo, "Failed to set up VT switcher. Terminal switching will be unavailable.\n");
     }
 
-    p->kms = kms_create(vo->log,
-                        vo->opts->drm_opts->drm_connector_spec,
-                        vo->opts->drm_opts->drm_mode_spec,
-                        0, 0, false);
-    if (!p->kms) {
-        MP_ERR(vo, "Failed to create KMS.\n");
-        goto err;
-    }
-
-    if (vo->opts->drm_opts->drm_format == DRM_OPTS_FORMAT_XRGB2101010) {
-        p->depth = 30;
-        p->imgfmt = IMGFMT_XRGB2101010;
+    if (open_kms(vo) == 0) {
+        return 0;
     } else {
-        p->depth = 24;
-        p->imgfmt = IMGFMT_XRGB8888;
+        uninit(vo);
+        return -1;
     }
-
-    if (!fb_setup_buffers(vo)) {
-        MP_ERR(vo, "Failed to set up buffers.\n");
-        goto err;
-    }
-
-    uint64_t has_dumb;
-    if (drmGetCap(p->kms->fd, DRM_CAP_DUMB_BUFFER, &has_dumb) < 0) {
-        MP_ERR(vo, "Card \"%d\" does not support dumb buffers.\n",
-               p->kms->card_no);
-        goto err;
-    }
-
-    p->screen_w = p->bufs[0].width;
-    p->screen_h = p->bufs[0].height;
-
-    if (!crtc_setup(vo)) {
-        MP_ERR(vo, "Cannot set CRTC: %s\n", mp_strerror(errno));
-        goto err;
-    }
-
-    if (vo->opts->force_monitor_aspect != 0.0) {
-        vo->monitor_par = p->screen_w / (double) p->screen_h /
-                          vo->opts->force_monitor_aspect;
-    } else {
-        vo->monitor_par = 1 / vo->opts->monitor_pixel_aspect;
-    }
-    mp_verbose(vo->log, "Monitor pixel aspect: %g\n", vo->monitor_par);
-
-    p->vsync_info.vsync_duration = 0;
-    p->vsync_info.skipped_vsyncs = -1;
-    p->vsync_info.last_queue_display_time = -1;
-
-    return 0;
-
-err:
-    uninit(vo);
-    return -1;
 }
 
 static int query_format(struct vo *vo, int format)

@@ -537,9 +537,9 @@ struct kms *kms_create(struct mp_log *log, const char *connector_spec,
         goto err;
     }
 
-    if (drmSetMaster(kms->fd)) {
-        mp_warn(log, "Failed to acquire DRM master: %s\n", mp_strerror(errno));
-    }
+//    if (drmSetMaster(kms->fd)) {
+//        mp_warn(log, "Failed to acquire DRM master: %s\n", mp_strerror(errno));
+//    }
 
     res = drmModeGetResources(kms->fd);
     if (!res) {
