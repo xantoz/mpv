@@ -487,6 +487,7 @@ def build(ctx):
         ( "video/out/vo_caca.c",                 "caca" ),
         ( "video/out/vo_direct3d.c",             "direct3d" ),
         ( "video/out/vo_drm.c",                  "drm" ),
+        ( "video/out/vo_fbdev.c",                 ),
         ( "video/out/vo_gpu.c" ),
         ( "video/out/vo_image.c" ),
         ( "video/out/vo_lavc.c" ),
