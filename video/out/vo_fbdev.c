@@ -46,7 +46,6 @@ struct priv
 {
     char *fb_dev_name; // such as /dev/fb0
     int fb_dev_fd; // handle for fb_dev_name
-    int fb_omap; // whether this looks like a omapfb device
     uint8_t *frame_buffer; // mmap'd access to fbdev
     uint8_t *center; // where to begin writing our image (centered?)
     struct fb_fix_screeninfo fb_finfo; // fixed info
@@ -183,9 +182,6 @@ static int fb_preinit(struct vo *vo, int reset)
         MP_ERR(vo, "Can't get VSCREENINFO: %s\n", mp_strerror(errno));
         goto err_out;
     }
-    // random ioctl to check if we seem to run on OMAPFB
-#define OMAPFB_SYNC_GFX (('O' << 8) | 37)
-    p->fb_omap = ioctl(p->fb_dev_fd, OMAPFB_SYNC_GFX) == 0;
     p->fb_orig_vinfo = p->fb_vinfo;
 
     p->fb_err = 0;
@@ -218,6 +214,11 @@ static int preinit(struct vo *vo)
 static int reconfig(struct vo *vo, struct mp_image_params *params)
 {
     struct priv *p = vo->priv;
+
+    vo->dwidth = p->fb_vinfo.xres;
+    vo->dheight = p->fb.vinfo.yres;
+
+    /********************************************************************************/
 
     // Oldness compatibility.
     // TODO: do something that actually works. This has obv. changed. What we
@@ -333,18 +334,6 @@ static int query_format(struct vo *vo, uint32_t format)
 {
     // open the device, etc.
     if (fb_preinit(vo, 0)) return 0;
-    // At least IntelFB silently ignores nonstd value,
-    // so we can run the ioctl check only if already
-    // determined we are running on OMAPFB
-    if (fb_omap && (format == IMGFMT_YUY2 ||
-                    format == IMGFMT_UYVY)) {
-        p->fb_vinfo.xres_virtual = p->b_vinfo.xres;
-        p->fb_vinfo.yres_virtual = p->b_vinfo.yres;
-        p->fb_vinfo.nonstd = format == IMGFMT_YUY2 ? 8 : 1;
-        if (ioctl(p->fb_dev_fd, FBIOPUT_VSCREENINFO, &p->fb_vinfo) == 0)
-            return VFCAP_CSP_SUPPORTED|VFCAP_CSP_SUPPORTED_BY_HW|VFCAP_ACCEPT_STRIDE;
-        return 0;
-    }
     if (IMGFMT_IS_BGR(format)) {
         int bpp;
         int fb_target_bpp = format & 0xff;
@@ -354,8 +343,8 @@ static int query_format(struct vo *vo, uint32_t format)
         p->fb_vinfo.nonstd = 0;
         if (ioctl(p->fb_dev_fd, FBIOPUT_VSCREENINFO, &fb_vinfo))
             // Needed for Intel framebuffer with 32 bpp
-            fb_vinfo.transp.length = fb_vinfo.transp.offset = 0;
-        if (ioctl(p->fb_dev_fd, FBIOPUT_VSCREENINFO, &fb_vinfo)) {
+            p->fb_vinfo.transp.length = p->fb_vinfo.transp.offset = 0;
+        if (ioctl(p->fb_dev_fd, FBIOPUT_VSCREENINFO, &p->fb_vinfo)) {
             MP_ERR(vo, "Can't put VSCREENINFO: %s\n", mp_strerror(errno));
             return 0;
         }
@@ -465,7 +454,8 @@ const struct vo_driver video_out_fbdev = {
     .query_format = query_format,
     .reconfig = reconfig,
     /* .control = control, */
-    .draw_frame = draw_frame,
+    /* .draw_frame = draw_frame, */
+    .draw_image = draw_image,
     .flip_page = flip_page,
     .uninit = uninit,
     .priv_size = sizeof(struct priv),
