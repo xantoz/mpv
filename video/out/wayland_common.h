@@ -101,6 +101,9 @@ struct vo_wayland_state {
     uint32_t pts_clk_id;
     struct wp_presentation_feedback *pts_feedback;
 
+    uint64_t last_ust;
+    uint64_t last_msc;
+
     /* Cursor */
     struct wl_cursor_theme *cursor_theme;
     struct wl_cursor       *default_cursor;

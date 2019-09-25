@@ -840,6 +840,9 @@ static void pts_presented(void *data, struct wp_presentation_feedback *pts_feedb
     const uint64_t now_monotonic = ts.tv_sec * 1000000LL + ts.tv_nsec / 1000;
     const uint64_t ust = (((uint64_t)sec_hi << 32) | ((uint64_t)sec_lo))*1000000LL + nsec/1000;
     const uint64_t ust_mp_time = mp_time_us() - (now_monotonic - ust);
+
+    const uint64_t msc = (((uint64_t)seq_hi << 32) | ((uint64_t)seq_lo));
+
     /* vsync.last_queue_display_time = ust_mp_time; */
     /* vsync.last_queue_display_time = ust_mp_time + (1*refresh_nsec/1000); */
     vsync.last_queue_display_time = ust_mp_time + (2*refresh_nsec/1000);
@@ -852,8 +855,12 @@ static void pts_presented(void *data, struct wp_presentation_feedback *pts_feedb
             flags & WP_PRESENTATION_FEEDBACK_KIND_HW_COMPLETION ? "hwcompletion" : "",
             flags & WP_PRESENTATION_FEEDBACK_KIND_ZERO_COPY ? "zerocopy" : "");
 
+    wl->last_ust = ust;
+    wl->last_msc = msc;
+
     wp_presentation_feedback_destroy(wl->pts_feedback);
     wl->pts_feedback = NULL;
+
 }
 
 static void pts_discarded(void *data,
