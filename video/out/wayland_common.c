@@ -1447,9 +1447,9 @@ void vo_wayland_wait_frame(struct vo *vo)
     /* }; */
 
     double vblank_time = 1e6 / wl->current_output->refresh_rate;
-    /* int64_t finish_time = mp_time_us() + vblank_time; */
+    int64_t finish_time = mp_time_us() + vblank_time;
     int64_t now = mp_time_us();
-    int64_t finish_time = now + vblank_time*300;
+    /* int64_t finish_time = now + vblank_time*300; */
 
     while (wl->callback_wait && finish_time > now) {
         vo_wayland_wait_events(vo, finish_time);
