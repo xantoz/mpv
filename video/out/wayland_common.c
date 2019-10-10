@@ -1409,6 +1409,7 @@ void vo_wayland_wakeup(struct vo *vo)
     (void)write(wl->wakeup_pipe[1], &(char){0}, 1);
 }
 
+/*
 void vo_wayland_wait_frame(struct vo_wayland_state *wl)
 {
     struct pollfd fds[1] = {
@@ -1416,7 +1417,7 @@ void vo_wayland_wait_frame(struct vo_wayland_state *wl)
     };
 
     double vblank_time = 1e6 / wl->current_output->refresh_rate;
-    int64_t finish_time = mp_time_us() + vblank_time;
+    int64_t finish_time = mp_time_us() + vblank_time*3;
 
     while (wl->callback_wait && finish_time > mp_time_us()) {
 
@@ -1435,6 +1436,27 @@ void vo_wayland_wait_frame(struct vo_wayland_state *wl)
         wl_display_dispatch_pending(wl->display);
     }
 }
+*/
+
+void vo_wayland_wait_frame(struct vo *vo)
+{
+    struct vo_wayland_state *wl = vo->wl;
+
+    /* struct pollfd fds[1] = { */
+    /*     {.fd = wl->display_fd,     .events = POLLIN }, */
+    /* }; */
+
+    double vblank_time = 1e6 / wl->current_output->refresh_rate;
+    /* int64_t finish_time = mp_time_us() + vblank_time; */
+    int64_t now = mp_time_us();
+    int64_t finish_time = now + vblank_time*300;
+
+    while (wl->callback_wait && finish_time > now) {
+        vo_wayland_wait_events(vo, finish_time);
+        now = mp_time_us();
+    }
+}
+
 
 void vo_wayland_wait_events(struct vo *vo, int64_t until_time_us)
 {

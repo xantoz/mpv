@@ -48,7 +48,7 @@ static void wayland_vk_swap_buffers(struct ra_ctx *ctx)
 {
     struct vo_wayland_state *wl = ctx->vo->wl;
 
-    vo_wayland_wait_frame(wl);
+    vo_wayland_wait_frame(ctx->vo);
     wl->callback_wait = true;
 }
 

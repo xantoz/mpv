@@ -235,8 +235,17 @@ int ra_gl_ctx_color_depth(struct ra_swapchain *sw)
 bool ra_gl_ctx_start_frame(struct ra_swapchain *sw, struct ra_fbo *out_fbo)
 {
     struct priv *p = sw->priv;
+    GL *gl = p->gl;
+
     out_fbo->tex = p->wrapped_fb;
     out_fbo->flip = !p->params.flipped; // OpenGL FBs are normally flipped
+
+    if (false && gl->FenceSync && !p->params.external_swapchain) {
+        GLsync fence = gl->FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+        if (fence)
+            MP_TARRAY_APPEND(p, p->vsync_fences, p->num_vsync_fences, fence);
+    }
+
     return true;
 }
 
@@ -245,14 +254,14 @@ bool ra_gl_ctx_submit_frame(struct ra_swapchain *sw, const struct vo_frame *fram
     struct priv *p = sw->priv;
     GL *gl = p->gl;
 
+    while (p->num_vsync_fences >= sw->ctx->vo->opts->swapchain_depth) {
+        gl->ClientWaitSync(p->vsync_fences[0], GL_SYNC_FLUSH_COMMANDS_BIT, 1e9);
+        gl->DeleteSync(p->vsync_fences[0]);
+        MP_TARRAY_REMOVE_AT(p->vsync_fences, p->num_vsync_fences, 0);
+    }
+
     if (p->opts->use_glfinish)
         gl->Finish();
-
-    if (gl->FenceSync && !p->params.external_swapchain) {
-        GLsync fence = gl->FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-        if (fence)
-            MP_TARRAY_APPEND(p, p->vsync_fences, p->num_vsync_fences, fence);
-    }
 
     switch (p->opts->early_flush) {
     case FLUSH_AUTO:
@@ -304,12 +313,6 @@ void ra_gl_ctx_swap_buffers(struct ra_swapchain *sw)
         MP_DBG(p, "Flip counts: %u->%u, step=%d\n", n1, n2, step);
         if (p->opts->vsync_pattern[0])
             check_pattern(p, step);
-    }
-
-    while (p->num_vsync_fences >= sw->ctx->vo->opts->swapchain_depth) {
-        gl->ClientWaitSync(p->vsync_fences[0], GL_SYNC_FLUSH_COMMANDS_BIT, 1e9);
-        gl->DeleteSync(p->vsync_fences[0]);
-        MP_TARRAY_REMOVE_AT(p->vsync_fences, p->num_vsync_fences, 0);
     }
 }
 
