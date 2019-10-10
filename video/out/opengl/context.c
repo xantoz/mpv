@@ -240,7 +240,7 @@ bool ra_gl_ctx_start_frame(struct ra_swapchain *sw, struct ra_fbo *out_fbo)
     out_fbo->tex = p->wrapped_fb;
     out_fbo->flip = !p->params.flipped; // OpenGL FBs are normally flipped
 
-    if (false && gl->FenceSync && !p->params.external_swapchain) {
+    if (gl->FenceSync && !p->params.external_swapchain) {
         GLsync fence = gl->FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
         if (fence)
             MP_TARRAY_APPEND(p, p->vsync_fences, p->num_vsync_fences, fence);
