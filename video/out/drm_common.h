@@ -57,6 +57,7 @@ struct drm_opts {
     int drm_drmprime_video_plane;
     int drm_format;
     struct m_geometry drm_draw_surface_size;
+    char **drm_connector_props;
 };
 
 struct drm_vsync_tuple {
@@ -86,6 +87,7 @@ void vt_switcher_release(struct vt_switcher *s, void (*handler)(void*),
 struct kms *kms_create(struct mp_log *log,
                        const char *drm_device_path,
                        const char *connector_spec,
+                       char **connector_props,
                        const char *mode_spec,
                        int draw_plane, int drmprime_video_plane,
                        bool use_atomic);
