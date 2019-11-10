@@ -26,6 +26,7 @@
 #include <limits.h>
 #include <math.h>
 #include <time.h>
+#include <inttypes.h>
 
 #include "drm_common.h"
 
@@ -81,6 +82,7 @@ const struct m_sub_options drm_conf = {
                    ({"xrgb8888",    DRM_OPTS_FORMAT_XRGB8888},
                     {"xrgb2101010", DRM_OPTS_FORMAT_XRGB2101010})),
         OPT_SIZE_BOX("drm-draw-surface-size", drm_draw_surface_size, 0),
+        OPT_KEYVALUELIST("drm-connector-props", drm_connector_props, 0),
 
         OPT_REPLACED("drm-osd-plane-id", "drm-draw-plane"),
         OPT_REPLACED("drm-video-plane-id", "drm-drmprime-video-plane"),
@@ -215,6 +217,116 @@ static bool setup_connector(struct kms *kms, const drmModeRes *res,
     }
 
     kms->connector = connector;
+    return true;
+}
+
+// TODO?: this uses old legacy methods... maybe just refactor the code in
+//        drm_atomic to be generic for all properties, even legacy ones on the
+//        connector (drmModeObjectSetProperty can probably be used to set anything non-atomically)
+// TODO2?: Maybe do the just drop non-atomic support entirely first + refactor
+//         extensively, then implement this? It'll fit much more neatly with lots
+//         less special-purpose code.
+static bool setup_connector_props(struct kms *kms, char **kv)
+{
+    drmModeConnector *connector = kms->connector;
+    char *connector_name = "<connector name here>"; /* TODO: need connector name for error messages */
+
+    // kv is in the format as by OPT_KEYVALUELIST(): kv[0]=key0, kv[1]=val0, ...
+    for (int n = 0; kv && kv[n * 2]; n++) {
+        char *target_prop_name = kv[n * 2 + 0];
+        char *target_prop_value = kv[n * 2 + 1];
+
+        // Find the relevant property
+        bool prop_found = false;
+        drmModePropertyRes *prop = NULL;
+        for (int i = 0; i < connector->count_props; ++i) {
+            prop = drmModeGetProperty(kms->fd, connector->props[i]);
+            if (!prop) {
+                MP_WARN(kms, "drmModeGetProperty failed: %s\n", mp_strerror(errno));
+                continue;
+            }
+
+            bool atomic = prop->flags & DRM_MODE_PROP_ATOMIC;
+            bool immutable = prop->flags & DRM_MODE_PROP_IMMUTABLE;
+            // Ignore atomic properties (they probably don't make sense setting in this
+            // context anyway) and immutable properties (obviously non-settable)
+            if (atomic || immutable)
+                continue;
+
+            if (strcmp(target_prop_name, prop->name) == 0) {
+                prop_found = true;
+                break;
+            }
+        }
+
+        if (!prop_found) {
+            MP_ERR(kms, "No such connector property, '%s', on connector %s\n",
+                   target_prop_name, connector_name);
+            return false;
+        }
+
+        uint32_t type = prop->flags &
+            (DRM_MODE_PROP_LEGACY_TYPE | DRM_MODE_PROP_EXTENDED_TYPE);
+
+        char *endptr = NULL;
+        uint64_t value = 0;
+
+        switch (type) {
+        case DRM_MODE_PROP_RANGE:  // TODO: might be nice to allow setting to "min" or "max" ?
+        case DRM_MODE_PROP_BITMASK: // TODO: more intelligent way of setting?
+            value = strtoumax(target_prop_value, &endptr, 10);
+            if (target_prop_value[0] == '\0' || *endptr != '\0') {
+                MP_ERR(kms, "Badly formatted number: %s\n", target_prop_value);
+                return false;
+            }
+            break;
+        case DRM_MODE_PROP_SIGNED_RANGE: // TODO: do we need to support this?
+            value = (uint64_t)((int64_t)strtoimax(target_prop_value, &endptr, 10));
+            if (target_prop_value[0] == '\0' || *endptr != '\0') {
+                MP_ERR(kms, "Badly formatted number: %s\n", target_prop_value);
+                return false;
+            }
+            break;
+        case DRM_MODE_PROP_ENUM: // TODO: should we accept numbers as well?
+        {
+            bool enum_found = false;
+            for (int j = 0; j < prop->count_enums; ++j) {
+                if (strcmp(target_prop_value, prop->enums[j].name) == 0) {
+                    enum_found = true;
+                    value = prop->enums[j].value;
+                    break;
+                }
+            }
+            if (!enum_found) {
+                MP_ERR(kms, "No such enum value, '%s', for property '%s' on connector %s\n",
+                       target_prop_value, target_prop_name, connector_name);
+                return false;
+            }
+            break;
+        }
+        case DRM_MODE_PROP_OBJECT:
+        case DRM_MODE_PROP_BLOB:
+            MP_ERR(kms, "--drm-connector-props does not support setting DRM_MODE_PROP_OBJECT or DRM_MODE_PROP_BLOB properties\n");
+            return false;
+            break;
+        }
+
+        /*
+        ** TODO: here stash away the current value of the property (find in
+        ** connector->prop_values), for restoring later
+        */
+
+        MP_VERBOSE(kms, "Setting property '%s', of connector %s, to: %#"PRIx64"\n",
+                   prop->name, connector_name, value);
+        if (drmModeConnectorSetProperty(kms->fd,
+                                        connector->connector_id,
+                                        prop->prop_id, value) != 0) {
+            MP_ERR(kms, "Error setting property, '%s', on connnector %s: %s\n",
+                   prop->name, connector_name, mp_strerror(errno));
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -512,7 +624,8 @@ static void parse_connector_spec(struct mp_log *log,
     }
 }
 
-struct kms *kms_create(struct mp_log *log, const char *connector_spec,
+struct kms *kms_create(struct mp_log *log,
+                       const char *connector_spec, char **connector_props,
                        const char* mode_spec,
                        int draw_plane, int drmprime_video_plane,
                        bool use_atomic)
@@ -551,6 +664,8 @@ struct kms *kms_create(struct mp_log *log, const char *connector_spec,
     }
 
     if (!setup_connector(kms, res, connector_name))
+        goto err;
+    if (!setup_connector_props(kms, connector_props))
         goto err;
     if (!setup_crtc(kms, res))
         goto err;
