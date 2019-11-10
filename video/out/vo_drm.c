@@ -575,6 +575,7 @@ static int preinit(struct vo *vo)
 
     p->kms = kms_create(vo->log,
                         vo->opts->drm_opts->drm_connector_spec,
+                        vo->opts->drm_opts->drm_connector_props,
                         vo->opts->drm_opts->drm_mode_spec,
                         0, 0, false);
     if (!p->kms) {
