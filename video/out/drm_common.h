@@ -57,6 +57,7 @@ struct drm_opts {
     int drm_format;
     struct m_geometry draw_surface_size;
     int vrr_enabled;
+    char **connector_props;
 };
 
 struct vt_switcher {

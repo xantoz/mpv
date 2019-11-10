@@ -26,6 +26,7 @@
 #include <math.h>
 #include <time.h>
 #include <drm_fourcc.h>
+#include <inttypes.h>
 
 #include "config.h"
 
@@ -96,6 +97,7 @@ const struct m_sub_options drm_conf = {
             {"xbgr2101010", DRM_OPTS_FORMAT_XBGR2101010},
             {"yuyv",        DRM_OPTS_FORMAT_YUYV})},
         {"drm-draw-surface-size", OPT_SIZE_BOX(draw_surface_size)},
+        {"drm-connector-props", OPT_KEYVALUELIST(connector_props)},
         {"drm-vrr-enabled", OPT_CHOICE(vrr_enabled,
             {"no", 0}, {"yes", 1}, {"auto", -1})},
         {0},
@@ -527,6 +529,116 @@ static bool setup_connector(struct vo_drm_state *drm, const drmModeRes *res,
     }
 
     drm->connector = connector;
+    return true;
+}
+
+// TODO?: this uses old legacy methods... maybe just refactor the code in
+//        drm_atomic to be generic for all properties, even legacy ones on the
+//        connector (drmModeObjectSetProperty can probably be used to set anything non-atomically)
+// TODO2?: Maybe do the just drop non-atomic support entirely first + refactor
+//         extensively, then implement this? It'll fit much more neatly with lots
+//         less special-purpose code.
+static bool setup_connector_props(struct vo_drm_state *drm, char **kv)
+{
+    drmModeConnector *connector = drm->connector;
+    char *connector_name = "<connector name here>"; /* TODO: need connector name for error messages */
+
+    // kv is in the format as by OPT_KEYVALUELIST(): kv[0]=key0, kv[1]=val0, ...
+    for (int n = 0; kv && kv[n * 2]; n++) {
+        char *target_prop_name = kv[n * 2 + 0];
+        char *target_prop_value = kv[n * 2 + 1];
+
+        // Find the relevant property
+        bool prop_found = false;
+        drmModePropertyRes *prop = NULL;
+        for (int i = 0; i < connector->count_props; ++i) {
+            prop = drmModeGetProperty(drm->fd, connector->props[i]);
+            if (!prop) {
+                MP_WARN(drm, "drmModeGetProperty failed: %s\n", mp_strerror(errno));
+                continue;
+            }
+
+            bool atomic = prop->flags & DRM_MODE_PROP_ATOMIC;
+            bool immutable = prop->flags & DRM_MODE_PROP_IMMUTABLE;
+            // Ignore atomic properties (they probably don't make sense setting in this
+            // context anyway) and immutable properties (obviously non-settable)
+            if (atomic || immutable)
+                continue;
+
+            if (strcmp(target_prop_name, prop->name) == 0) {
+                prop_found = true;
+                break;
+            }
+        }
+
+        if (!prop_found) {
+            MP_ERR(drm, "No such connector property, '%s', on connector %s\n",
+                   target_prop_name, connector_name);
+            return false;
+        }
+
+        uint32_t type = prop->flags &
+            (DRM_MODE_PROP_LEGACY_TYPE | DRM_MODE_PROP_EXTENDED_TYPE);
+
+        char *endptr = NULL;
+        uint64_t value = 0;
+
+        switch (type) {
+        case DRM_MODE_PROP_RANGE:  // TODO: might be nice to allow setting to "min" or "max" ?
+        case DRM_MODE_PROP_BITMASK: // TODO: more intelligent way of setting?
+            value = strtoumax(target_prop_value, &endptr, 10);
+            if (target_prop_value[0] == '\0' || *endptr != '\0') {
+                MP_ERR(drm, "Badly formatted number: %s\n", target_prop_value);
+                return false;
+            }
+            break;
+        case DRM_MODE_PROP_SIGNED_RANGE: // TODO: do we need to support this?
+            value = (uint64_t)((int64_t)strtoimax(target_prop_value, &endptr, 10));
+            if (target_prop_value[0] == '\0' || *endptr != '\0') {
+                MP_ERR(drm, "Badly formatted number: %s\n", target_prop_value);
+                return false;
+            }
+            break;
+        case DRM_MODE_PROP_ENUM: // TODO: should we accept numbers as well?
+        {
+            bool enum_found = false;
+            for (int j = 0; j < prop->count_enums; ++j) {
+                if (strcmp(target_prop_value, prop->enums[j].name) == 0) {
+                    enum_found = true;
+                    value = prop->enums[j].value;
+                    break;
+                }
+            }
+            if (!enum_found) {
+                MP_ERR(drm, "No such enum value, '%s', for property '%s' on connector %s\n",
+                       target_prop_value, target_prop_name, connector_name);
+                return false;
+            }
+            break;
+        }
+        case DRM_MODE_PROP_OBJECT:
+        case DRM_MODE_PROP_BLOB:
+            MP_ERR(drm, "--drm-connector-props does not support setting DRM_MODE_PROP_OBJECT or DRM_MODE_PROP_BLOB properties\n");
+            return false;
+            break;
+        }
+
+        /*
+        ** TODO: here stash away the current value of the property (find in
+        ** connector->prop_values), for restoring later
+        */
+
+        MP_VERBOSE(drm, "Setting property '%s', of connector %s, to: %#"PRIx64"\n",
+                   prop->name, connector_name, value);
+        if (drmModeConnectorSetProperty(drm->fd,
+                                        connector->connector_id,
+                                        prop->prop_id, value) != 0) {
+            MP_ERR(drm, "Error setting property, '%s', on connnector %s: %s\n",
+                   prop->name, connector_name, mp_strerror(errno));
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -1001,6 +1113,8 @@ bool vo_drm_init(struct vo *vo)
     }
 
     if (!setup_connector(drm, res, drm->opts->connector_spec))
+        goto err;
+    if (!setup_connector_props(drm, drm->opts->connector_props))
         goto err;
     if (!setup_crtc(drm, res))
         goto err;
