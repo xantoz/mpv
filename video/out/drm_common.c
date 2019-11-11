@@ -232,6 +232,10 @@ static bool setup_connector(struct kms *kms, const drmModeRes *res,
 // TODO?: this uses old legacy methods... maybe just refactor the code in
 //        drm_atomic to be generic for all properties, even legacy ones on the
 //        connector (drmModeObjectSetProperty can probably be used to set anything non-atomically)
+// TODO3?: Actually just generalize this function instead so it can be easily
+//         made to work on anything that has properties that are settable using drmModeObjectSetProperty.
+//         The general function should just take:
+//             char **kv, <handle to obj>, uint32_t count_props, uint32_t *props, uint64_t *prop_values
 // TODO2?: Maybe do the just drop non-atomic support entirely first + refactor
 //         extensively, then implement this? It'll fit much more neatly with lots
 //         less special-purpose code.
@@ -282,7 +286,7 @@ static bool setup_connector_props(struct kms *kms, char **kv)
 
         switch (type) {
         case DRM_MODE_PROP_RANGE:  // TODO: might be nice to allow setting to "min" or "max" ?
-        case DRM_MODE_PROP_BITMASK: // TODO: more intelligent way of setting?
+        case DRM_MODE_PROP_BITMASK: // TODO: more intelligent way of setting bitmask?
             value = strtoumax(target_prop_value, &endptr, 10);
             if (target_prop_value[0] == '\0' || *endptr != '\0') {
                 MP_ERR(kms, "Badly formatted number: %s\n", target_prop_value);
