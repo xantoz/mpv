@@ -57,31 +57,37 @@ int drm_prime_create_framebuffer(struct mp_log *log, int fd,
 
         layer = &descriptor->layers[0];
 
-        bool b = false;
         for (int plane = 0; plane < AV_DRM_MAX_PLANES; plane++) {
             layer_fd = framebuffer->gem_handles[layer->planes[plane].object_index];
             if (layer_fd && layer->planes[plane].pitch) {
-                mp_err(log, "A\n");
                 pitches[plane] = layer->planes[plane].pitch;
                 offsets[plane] = layer->planes[plane].offset;
                 handles[plane] = layer_fd;
             } else {
-                mp_err(log, "B\n");
                 pitches[plane] = 0;
                 offsets[plane] = 0;
                 handles[plane] = 0;
-                b = true;
             }
         }
+
         ret = drmModeAddFB2WithModifiers(fd, width, height, layer->format,
                                          handles, pitches, offsets,
                                          modifiers, &framebuffer->fb_id,
-                                         (b) ? 0 : DRM_MODE_FB_MODIFIERS);
+                                         DRM_MODE_FB_MODIFIERS);
         if (ret < 0) {
-            mp_err(log, "Failed to create framebuffer on layer %d: %s\n",
+            mp_warn(log, "Failed to create framebuffer with drmModeAddFB2WithModifiers on layer %d: %s\n",
                    0, mp_strerror(errno));
-            goto fail;
+            mp_warn(log, "Falling back on drmModeAddFB2\n");
+            ret = drmModeAddFB2(fd, width, height, layer->format,
+                          handles, pitches, offsets,
+                          &framebuffer->fb_id, 0);
+            if (ret < 0) {
+                mp_err(log, "Failed to create framebuffer with drmModeAddFB2 on layer %d: %s\n",
+                        0, mp_strerror(errno));
+                goto fail;
+            }
         }
+
         for (int plane = 0; plane < AV_DRM_MAX_PLANES; plane++) {
             drm_prime_add_handle_ref(handle_refs, framebuffer->gem_handles[plane]);
         }
