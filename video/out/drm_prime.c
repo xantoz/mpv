@@ -32,8 +32,10 @@ int drm_prime_create_framebuffer(struct mp_log *log, int fd,
                                  struct drm_prime_handle_refs *handle_refs)
 {
     AVDRMLayerDescriptor *layer = NULL;
-    uint32_t pitches[4], offsets[4], handles[4];
-    uint64_t modifiers[4];
+    uint32_t pitches[4] = { 0 };
+    uint32_t offsets[4] = { 0 };
+    uint32_t handles[4] = { 0 };
+    uint64_t modifiers[4] = { 0 };
     int ret, layer_fd;
 
     if (descriptor && descriptor->nb_layers) {
@@ -47,32 +49,34 @@ int drm_prime_create_framebuffer(struct mp_log *log, int fd,
                        object, descriptor->objects[object].fd);
                 goto fail;
             }
-            if (object == 0) {
-                modifiers[object] = descriptor->objects[object].format_modifier;
-            }
+            modifiers[object] = descriptor->objects[object].format_modifier;
+            mp_warn(log, "descriptor->objects[%d].format_modifier: %lu\n",
+                    object, descriptor->objects[object].format_modifier);
+
         }
 
         layer = &descriptor->layers[0];
 
+        bool b = false;
         for (int plane = 0; plane < AV_DRM_MAX_PLANES; plane++) {
             layer_fd = framebuffer->gem_handles[layer->planes[plane].object_index];
             if (layer_fd && layer->planes[plane].pitch) {
+                mp_err(log, "A\n");
                 pitches[plane] = layer->planes[plane].pitch;
                 offsets[plane] = layer->planes[plane].offset;
                 handles[plane] = layer_fd;
-                modifiers[plane] = modifiers[0];
             } else {
+                mp_err(log, "B\n");
                 pitches[plane] = 0;
                 offsets[plane] = 0;
                 handles[plane] = 0;
-                modifiers[plane] = 0;
+                b = true;
             }
         }
-
         ret = drmModeAddFB2WithModifiers(fd, width, height, layer->format,
                                          handles, pitches, offsets,
                                          modifiers, &framebuffer->fb_id,
-                                         DRM_MODE_FB_MODIFIERS);
+                                         (b) ? 0 : DRM_MODE_FB_MODIFIERS);
         if (ret < 0) {
             mp_err(log, "Failed to create framebuffer on layer %d: %s\n",
                    0, mp_strerror(errno));
