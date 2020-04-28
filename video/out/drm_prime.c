@@ -50,9 +50,6 @@ int drm_prime_create_framebuffer(struct mp_log *log, int fd,
                 goto fail;
             }
             modifiers[object] = descriptor->objects[object].format_modifier;
-            mp_warn(log, "descriptor->objects[%d].format_modifier: %lu\n",
-                    object, descriptor->objects[object].format_modifier);
-
         }
 
         layer = &descriptor->layers[0];
@@ -75,9 +72,6 @@ int drm_prime_create_framebuffer(struct mp_log *log, int fd,
                                          modifiers, &framebuffer->fb_id,
                                          DRM_MODE_FB_MODIFIERS);
         if (ret < 0) {
-            mp_warn(log, "Failed to create framebuffer with drmModeAddFB2WithModifiers on layer %d: %s\n",
-                   0, mp_strerror(errno));
-            mp_warn(log, "Falling back on drmModeAddFB2\n");
             ret = drmModeAddFB2(fd, width, height, layer->format,
                           handles, pitches, offsets,
                           &framebuffer->fb_id, 0);
