@@ -37,11 +37,7 @@
 #include "vo.h"
 
 #define IMGFMT_XRGB8888 IMGFMT_BGR0
-#if BYTE_ORDER == BIG_ENDIAN
-#define IMGFMT_XRGB2101010 pixfmt2imgfmt(AV_PIX_FMT_GBRP10BE)
-#else
-#define IMGFMT_XRGB2101010 pixfmt2imgfmt(AV_PIX_FMT_GBRP10LE)
-#endif
+#define IMGFMT_XRGB2101010 IMGFMT_RGB30
 
 #define BYTES_PER_PIXEL 4
 #define BITS_PER_PIXEL 32
@@ -395,35 +391,10 @@ static void draw_image(struct vo *vo, mp_image_t *mpi, struct framebuffer *front
             osd_draw_on_image(vo->osd, p->osd, 0, 0, p->cur_frame);
         }
 
-        if (p->drm_format == DRM_FORMAT_XRGB2101010) {
-            // Pack GBRP10 image into XRGB2101010 for DRM
-            const int w = p->cur_frame->w;
-            const int h = p->cur_frame->h;
-
-            const int g_padding = p->cur_frame->stride[0]/sizeof(uint16_t) - w;
-            const int b_padding = p->cur_frame->stride[1]/sizeof(uint16_t) - w;
-            const int r_padding = p->cur_frame->stride[2]/sizeof(uint16_t) - w;
-            const int fbuf_padding = front_buf->stride/sizeof(uint32_t) - w;
-
-            uint16_t *g_ptr = (uint16_t*)p->cur_frame->planes[0];
-            uint16_t *b_ptr = (uint16_t*)p->cur_frame->planes[1];
-            uint16_t *r_ptr = (uint16_t*)p->cur_frame->planes[2];
-            uint32_t *fbuf_ptr = (uint32_t*)front_buf->map;
-            for (unsigned y = 0; y < h; ++y) {
-                for (unsigned x = 0; x < w; ++x) {
-                    *fbuf_ptr++ = (*r_ptr++ << 20) | (*g_ptr++ << 10) | (*b_ptr++);
-                }
-                g_ptr += g_padding;
-                b_ptr += b_padding;
-                r_ptr += r_padding;
-                fbuf_ptr += fbuf_padding;
-            }
-        } else { // p->drm_format == DRM_FORMAT_XRGB8888
-            memcpy_pic(front_buf->map, p->cur_frame->planes[0],
-                       p->cur_frame->w * BYTES_PER_PIXEL, p->cur_frame->h,
-                       front_buf->stride,
-                       p->cur_frame->stride[0]);
-        }
+        memcpy_pic(front_buf->map, p->cur_frame->planes[0],
+                   p->cur_frame->w * BYTES_PER_PIXEL, p->cur_frame->h,
+                   front_buf->stride,
+                   p->cur_frame->stride[0]);
     }
 
     if (mpi != p->last_input) {
