@@ -990,6 +990,10 @@ bool vo_drm_init(struct vo *vo)
         drmFreeVersion(ver);
     }
 
+    if (drmSetMaster(drm->fd)) {
+        mp_warn(log, "Failed to acquire DRM master: %s\n", mp_strerror(errno));
+    }
+
     res = drmModeGetResources(drm->fd);
     if (!res) {
         MP_ERR(drm, "Cannot retrieve DRM resources: %s\n", mp_strerror(errno));
